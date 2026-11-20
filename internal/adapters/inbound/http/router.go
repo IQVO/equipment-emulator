@@ -42,6 +42,36 @@ type robotJSON struct {
 	Errors        []string `json:"errors"`
 }
 
+type unitJSON struct {
+	ID         string `json:"id"`
+	State      string `json:"state"`
+	CurrentJob string `json:"currentJob"`
+	Queued     int    `json:"queued"`
+}
+
+type asrsJSON struct {
+	ID    string            `json:"id"`
+	Slots map[string]string `json:"slots"`
+	Ports map[string]string `json:"ports"`
+	Units []unitJSON        `json:"units"`
+}
+
+// toAsrsJSON maps the domain view to the AsrsView schema; required maps and
+// arrays serialise as {} and [] when empty.
+func toAsrsJSON(v asrs.View) asrsJSON {
+	out := asrsJSON{ID: v.ID, Slots: map[string]string{}, Ports: map[string]string{}, Units: []unitJSON{}}
+	for k, c := range v.Slots {
+		out.Slots[k] = c
+	}
+	for k, c := range v.Ports {
+		out.Ports[k] = c
+	}
+	for _, u := range v.Units {
+		out.Units = append(out.Units, unitJSON{ID: u.ID, State: string(u.State), CurrentJob: u.CurrentJob, Queued: u.Queued})
+	}
+	return out
+}
+
 type faultJSON struct {
 	Kind   string  `json:"kind"`
 	Target string  `json:"target"`
@@ -95,7 +125,7 @@ func (h handlers) asrs(w http.ResponseWriter, req *http.Request) {
 		problem(w, http.StatusNotFound, "Not Found", "unknown asrs")
 		return
 	}
-	writeJSON(w, v)
+	writeJSON(w, toAsrsJSON(v))
 }
 
 func (h handlers) fault(w http.ResponseWriter, req *http.Request) {

@@ -109,16 +109,18 @@ type RejectError struct{ Reason string }
 
 func (e *RejectError) Error() string { return e.Reason }
 
+// UnitView is a read-only view of one aisle's unit.
 type UnitView struct {
-	ID         string    `json:"id"`
-	State      UnitState `json:"state"`
-	CurrentJob string    `json:"currentJob"`
-	Queued     int       `json:"queued"`
+	ID         string
+	State      UnitState
+	CurrentJob string
+	Queued     int
 }
 
+// View is a read-only view of the whole AS/RS (the admin adapter maps it to JSON).
 type View struct {
-	ID    string            `json:"id"`
-	Slots map[string]string `json:"slots"` // position -> container
-	Ports map[string]string `json:"ports"` // port -> container ("" = empty)
-	Units []UnitView        `json:"units"`
+	ID    string
+	Slots map[string]string // position -> container
+	Ports map[string]string // port -> container ("" = empty)
+	Units []UnitView
 }
