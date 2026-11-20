@@ -270,3 +270,19 @@ func TestChargingRaisesStateOfCharge(t *testing.T) {
 		t.Fatalf("still charging")
 	}
 }
+
+func TestEmptyBatteryNeverOvershootsWithInexactRatio(t *testing.T) {
+	c := cfg()
+	c.DrainPerMeter = 0.11
+	r := New(c)
+	r.SetStateOfCharge(0.3) // 0.3/0.11 m of range, not exactly representable
+	_ = r.AcceptOrder(straight())
+	r.Tick(60*time.Second, &fakePeripherals{})
+	s := r.Snapshot()
+	if s.LastNodeID != "n1" || s.Driving || s.StateOfCharge != 0 || math.Abs(s.Position.X-0.3/0.11) > 1e-9 {
+		t.Fatalf("state = %+v", s)
+	}
+	if len(s.Errors) != 1 || s.Errors[0].Type != ErrBatteryEmpty {
+		t.Fatalf("errors = %+v", s.Errors)
+	}
+}

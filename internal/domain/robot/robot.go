@@ -206,8 +206,11 @@ func (r *Robot) drive(remaining *time.Duration) bool {
 		speed = e.MaxSpeed
 	}
 	d := dist(r.pos, target.Pos)
+	capped := false
 	if r.cfg.DrainPerMeter > 0 {
-		d = math.Min(d, r.soc/r.cfg.DrainPerMeter) // cannot drive further than the battery allows
+		if reach := r.soc / r.cfg.DrainPerMeter; reach < d { // cannot drive further than the battery allows
+			d, capped = reach, true
+		}
 	}
 	step := speed * remaining.Seconds()
 	r.driving = true
@@ -218,11 +221,12 @@ func (r *Robot) drive(remaining *time.Duration) bool {
 	}
 	r.moveToward(target.Pos, d)
 	r.drain(d)
-	*remaining -= time.Duration(d / speed * float64(time.Second))
-	if r.soc <= 0 {
+	if capped { // the battery ran dry short of the node: stop here, do not arrive
+		r.soc = 0
 		r.driving = false
 		return false
 	}
+	*remaining -= time.Duration(d / speed * float64(time.Second))
 	r.next++
 	r.driving = false // standing on the node until the next edge starts
 	r.atNode, r.actionIdx, r.actionElapsed = true, 0, 0
