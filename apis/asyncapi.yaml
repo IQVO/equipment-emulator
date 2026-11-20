@@ -73,7 +73,7 @@ channels:
       tags: [{name: vda5050}]
       message: {$ref: "#/components/messages/InstantActions"}
   vda5050/v3/{manufacturer}/{serialNumber}/state:
-    description: The robot's state, published on every simulation update.
+    description: The robot's state, published when it changes (and at once after an order or instant actions) and at least every 30 s of simulated time while it does not (VDA 5050 v3 §6.6). A fault-disconnected robot publishes nothing.
     parameters:
       manufacturer: {$ref: "#/components/parameters/manufacturer"}
       serialNumber: {$ref: "#/components/parameters/serialNumber"}

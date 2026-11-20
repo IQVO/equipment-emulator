@@ -353,3 +353,44 @@ func TestAnnounceRobotRespectsFaultDisconnect(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestIdleRobotStateIsRepublishedEvery30SimulatedSeconds(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	if err := e.Announce(ctx); err != nil { // state #1 at t0
+		t.Fatal(err)
+	}
+	for i := 0; i < 29; i++ {
+		_ = e.Step(ctx, time.Second)
+	}
+	if len(rec.states) != 1 {
+		t.Fatalf("published before 30 s: %d", len(rec.states))
+	}
+	_ = e.Step(ctx, time.Second) // t0+30 s
+	if len(rec.states) != 2 {
+		t.Fatalf("no state after 30 s of silence: %d", len(rec.states))
+	}
+	_ = e.Step(ctx, 29*time.Second)
+	if len(rec.states) != 2 {
+		t.Fatalf("the interval restarts at each publish: %d", len(rec.states))
+	}
+	_ = e.Step(ctx, time.Second)
+	if len(rec.states) != 3 {
+		t.Fatalf("second heartbeat missing: %d", len(rec.states))
+	}
+	// a change publishes at once and restarts the interval
+	if err := e.HandleInstantActions(ctx, "R1", []robot.Action{{ID: "s", Type: "stateRequest"}}); err != nil {
+		t.Fatal(err)
+	}
+	n := len(rec.states)
+	_ = e.Step(ctx, 29*time.Second)
+	if len(rec.states) != n {
+		t.Fatalf("heartbeat too early after a change: %d -> %d", n, len(rec.states))
+	}
+	// a fault-disconnected robot stays silent
+	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: true})
+	_ = e.Step(ctx, time.Minute)
+	if len(rec.states) != n {
+		t.Fatalf("heartbeat while disconnected: %d -> %d", n, len(rec.states))
+	}
+}

@@ -12,7 +12,7 @@ carries the header (`headerId` counting per topic, `timestamp`, `version`,
 | --- | --- | --- |
 | `order` | fleet control to robot | orders and order updates |
 | `instantActions` | fleet control to robot | see below |
-| `state` | robot to fleet control | published on every simulation update |
+| `state` | robot to fleet control | published when it changes and at least every 30 s of simulated time (§6.6) |
 | `connection` | robot to fleet control | retained; `ONLINE`, `OFFLINE`, `CONNECTION_BROKEN` |
 | `factsheet` | robot to fleet control | retained; subset (`typeSpecification`, `physicalParameters`) |
 
@@ -21,6 +21,12 @@ Connection: each robot has its own MQTT client with a retained
 after connecting, retained `OFFLINE` on a coordinated shutdown, and after a
 reconnect it subscribes again and re-announces `ONLINE`, the factsheet and the
 state.
+
+State: the engine publishes a robot's state when it changed since the last
+publish, at once after every order and instant-action message, and otherwise
+whenever 30 s of simulated time have passed since that robot's last state (VDA
+5050 v3 §6.6: "at least every 30 seconds"; at `SIM_SPEED` 10 that is every 3 s
+of wall time). A fault-disconnected robot publishes nothing.
 
 Node actions: `pick` (parameter `loadId`), `drop`, `startCharging`,
 `stopCharging`. Instant actions: `cancelOrder`, `startCharging`,

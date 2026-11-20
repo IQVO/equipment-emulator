@@ -56,6 +56,11 @@ type Fault struct {
 	Value  float64
 }
 
+// StateInterval is the longest a robot stays silent on its state topic, in
+// simulated time: VDA 5050 v3 §6.6 says the state "shall be published when
+// relevant events occur or at least every 30 seconds".
+const StateInterval = 30 * time.Second
+
 // Connection states, as VDA 5050 names them.
 const (
 	connOnline = "ONLINE"
@@ -73,12 +78,13 @@ type Engine struct {
 	rp           RobotPublisher
 	ap           AsrsPublisher
 	last         map[string]robot.State
+	lastPub      map[string]time.Time // simulated time of each robot's last state publish
 	disconnected map[string]bool
 }
 
 func New(clock *simclock.Sim, robots []*robot.Robot, systems []*asrs.System, portNodes map[string]PortNode, rp RobotPublisher, ap AsrsPublisher) *Engine {
 	e := &Engine{clock: clock, robots: map[string]*robot.Robot{}, systems: map[string]*asrs.System{},
-		portNodes: portNodes, rp: rp, ap: ap, last: map[string]robot.State{}, disconnected: map[string]bool{}}
+		portNodes: portNodes, rp: rp, ap: ap, last: map[string]robot.State{}, lastPub: map[string]time.Time{}, disconnected: map[string]bool{}}
 	for _, r := range robots {
 		e.robots[r.Serial()] = r
 		e.serials = append(e.serials, r.Serial())
@@ -147,15 +153,19 @@ func (e *Engine) announce(ctx context.Context, serial string) error {
 		e.rp.PublishFactsheet(ctx, r.Factsheet(), now), e.publishState(ctx, serial, true, now))
 }
 
+// publishState publishes a robot's state when forced, when it changed, or when
+// StateInterval of simulated time passed since its last publish. The caller holds e.mu.
 func (e *Engine) publishState(ctx context.Context, serial string, force bool, now time.Time) error {
 	if e.disconnected[serial] {
 		return nil
 	}
 	st := e.robots[serial].Snapshot()
-	if !force && reflect.DeepEqual(st, e.last[serial]) {
+	last, published := e.lastPub[serial]
+	due := !published || now.Sub(last) >= StateInterval
+	if !force && !due && reflect.DeepEqual(st, e.last[serial]) {
 		return nil
 	}
-	e.last[serial] = st
+	e.last[serial], e.lastPub[serial] = st, now
 	return e.rp.PublishState(ctx, st, now)
 }
 
