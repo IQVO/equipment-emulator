@@ -30,8 +30,11 @@ unleash:
     #
     # WRITE A PLAIN NUMBER, NEVER A QUOTED STRING. gremlins v0.6.0 reads these two keys with
     # a float type assertion (internal/report/report.go `assess`), so `efficacy: "95"` (a YAML
-    # string) is read as 0 and the gate NEVER fails. Verified: a package at 95.24% efficacy exits 0
-    # with "99" and exits 10 with 99. The values below stay 0 (dormant) until you replace them:
-    # efficacy = {{MEASURED_EFFICACY_MINUS_1}}, mutant-coverage = {{MEASURED_MUTANT_COVERAGE_MINUS_1}}.
-    efficacy: 70
-    mutant-coverage: 93
+    # string) is read as 0 and the gate NEVER fails.
+    # Measured 2026-11-20 (after the Task 11 robot test hardening), threshold = floor(lower of the
+    # two runs) - 1 so both targets pass:
+    #   make mutation       (./internal/domain/robot): efficacy 94.39%, mutant coverage 97.27%
+    #   make mutation-full  (./internal/domain):       efficacy 86.59%, mutant coverage 98.35%
+    # => efficacy 85, mutant-coverage 96.
+    efficacy: 85
+    mutant-coverage: 96
