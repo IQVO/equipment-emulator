@@ -394,3 +394,22 @@ func TestIdleRobotStateIsRepublishedEvery30SimulatedSeconds(t *testing.T) {
 		t.Fatalf("heartbeat while disconnected: %d -> %d", n, len(rec.states))
 	}
 }
+
+func TestIsDisconnectedFollowsTheDisconnectFault(t *testing.T) {
+	e, _ := newEngine(t)
+	ctx := context.Background()
+	if e.IsDisconnected("R1") {
+		t.Fatal("R1 is disconnected before any fault")
+	}
+	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: true})
+	if !e.IsDisconnected("R1") {
+		t.Fatal("R1 is not disconnected after ROBOT_DISCONNECT active")
+	}
+	if e.IsDisconnected("NOPE") {
+		t.Fatal("an unknown serial reports disconnected")
+	}
+	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: false})
+	if e.IsDisconnected("R1") {
+		t.Fatal("R1 is still disconnected after ROBOT_DISCONNECT inactive")
+	}
+}

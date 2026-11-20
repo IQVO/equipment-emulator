@@ -8,6 +8,8 @@ import (
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/IQVO/equipment-emulator/internal/adapters/telegram"
 	"github.com/IQVO/equipment-emulator/internal/domain/asrs"
@@ -41,7 +43,12 @@ type AsrsGateway struct {
 	log    *slog.Logger
 	pub    func(topic string, payload []byte) error
 	inbox  *inbox
+	m      Metrics // nil records nothing; see SetMetrics
 }
+
+// SetMetrics installs the counters the gateway records (ADR 0005). Call it
+// before Start: the workers read it without a lock.
+func (g *AsrsGateway) SetMetrics(m Metrics) { g.m = m }
 
 // NewAsrsGateway connects the PLC client of one AS/RS. now is the simulated
 // clock that stamps the up telegrams.
@@ -79,35 +86,65 @@ func pos(p *telegram.Position) asrs.Position {
 	return asrs.Position{Aisle: p.Aisle, Level: p.Level, Slot: p.Slot, Depth: p.Depth}
 }
 
-// send publishes an up telegram. A tracked telegram is tracked BEFORE it is
-// published: the WCS's ACK can arrive (and be handled) before the publish
-// returns, and must find it.
-func (g *AsrsGateway) send(t telegram.Telegram, track bool) {
+// send publishes an up telegram inside a producer span and counts its first
+// send (retransmit marks a resend instead). A tracked telegram is tracked
+// BEFORE it is published: the WCS's ACK can arrive (and be handled) before
+// the publish returns, and must find it.
+func (g *AsrsGateway) send(ctx context.Context, t telegram.Telegram, track, retransmit bool) {
+	topic := telegram.UpTopic(g.asrsID)
+	ctx, span := startSpan(ctx, "publish telegram "+typeLabel(t.Type), trace.SpanKindProducer, topic,
+		attrAsrsID.String(g.asrsID), attrTelegramID.String(t.ID), attrTelegramTyp.String(typeLabel(t.Type)),
+		attrRetransmit.Bool(retransmit))
 	b, err := telegram.Encode(t)
 	if err != nil {
-		g.log.Error("cannot encode telegram", "type", t.Type, "err", err)
+		g.log.ErrorContext(ctx, "cannot encode telegram", "type", t.Type, "err", err)
+		endSpan(span, err)
 		return
+	}
+	if retransmit {
+		metricsOrNoop(g.m).TelegramRetransmitted(ctx, typeLabel(t.Type))
+	} else {
+		metricsOrNoop(g.m).TelegramSeen(ctx, directionUp, typeLabel(t.Type))
 	}
 	if track {
 		g.retx.Track(t, g.wall())
 	}
-	if err := g.pub(telegram.UpTopic(g.asrsID), b); err != nil {
-		g.log.Warn("publish failed; the retransmitter will retry", "telegramId", t.ID, "err", err)
+	err = g.pub(topic, b)
+	if err != nil {
+		g.log.WarnContext(ctx, "publish failed; the retransmitter will retry", "telegramId", t.ID, "err", err)
 	}
+	endSpan(span, err)
 }
 
-// handle processes one down telegram. Only the gateway's worker calls it, one
-// telegram at a time in arrival order, so no lock is needed: a STORE and a
-// later CANCEL of one job are never reordered, and Lookup then Remember of the
-// dedup cache cannot interleave.
+// handle processes one down telegram inside a consumer span (the root of its
+// trace: a telegram carries no trace context). Only the gateway's worker
+// calls it, one telegram at a time in arrival order, so no lock is needed: a
+// STORE and a later CANCEL of one job are never reordered, and Lookup then
+// Remember of the dedup cache cannot interleave.
 func (g *AsrsGateway) handle(ctx context.Context, m inbound) {
+	ctx, span := startSpan(ctx, "receive telegram", trace.SpanKindConsumer, telegram.DownTopic(g.asrsID),
+		attrAsrsID.String(g.asrsID))
+	defer span.End()
 	reply, afterAck := g.process(ctx, m.payload)
 	if reply != nil {
-		g.send(*reply, false)
+		g.send(ctx, *reply, false, false)
 	}
 	if afterAck != nil {
 		afterAck()
 	}
+}
+
+// observeDown names the receive span after the telegram and counts it.
+func (g *AsrsGateway) observeDown(ctx context.Context, t telegram.Telegram, decodeErr error) {
+	label := typeLabel(t.Type)
+	span := trace.SpanFromContext(ctx)
+	span.SetName("receive telegram " + label)
+	span.SetAttributes(attrTelegramID.String(t.ID), attrTelegramTyp.String(label))
+	if decodeErr != nil {
+		span.RecordError(decodeErr)
+		span.SetStatus(codes.Error, decodeErr.Error())
+	}
+	metricsOrNoop(g.m).TelegramSeen(ctx, directionDown, label)
 }
 
 // process decodes one down telegram, applies it through the commands and
@@ -115,8 +152,9 @@ func (g *AsrsGateway) handle(ctx context.Context, m inbound) {
 // that reply went out.
 func (g *AsrsGateway) process(ctx context.Context, payload []byte) (reply *telegram.Telegram, afterAck func()) {
 	t, err := telegram.Decode(payload)
+	g.observeDown(ctx, t, err)
 	if err != nil {
-		g.log.Warn("malformed telegram", "err", err)
+		g.log.WarnContext(ctx, "malformed telegram", "err", err)
 		if t.ID == "" {
 			return nil, nil
 		}
@@ -152,11 +190,11 @@ func (g *AsrsGateway) process(ctx context.Context, payload []byte) (reply *teleg
 	var re *asrs.RejectError
 	switch {
 	case errors.Is(cmdErr, ErrNotReady):
-		g.log.Warn("not ready; refused without remembering", "type", t.Type, "telegramId", t.ID)
+		g.log.WarnContext(ctx, "not ready; refused without remembering", "type", t.Type, "telegramId", t.ID)
 		ack := telegram.NewAck(t, ErrNotReady, uuid.NewString(), g.now())
 		return &ack, nil // transient: a retransmission must be processed, not answered from dedup
 	case cmdErr != nil && !errors.As(cmdErr, &re):
-		g.log.Error("command failed", "type", t.Type, "err", cmdErr)
+		g.log.ErrorContext(ctx, "command failed", "type", t.Type, "err", cmdErr)
 	}
 	ack := telegram.NewAck(t, cmdErr, uuid.NewString(), g.now())
 	g.dedup.Remember(t.ID, ack)
@@ -177,7 +215,7 @@ func (g *AsrsGateway) Start(ctx context.Context) error {
 func (g *AsrsGateway) startWorker(ctx context.Context) { go g.inbox.drain(ctx, g.handle) }
 
 // Publish turns PLC events into up telegrams that wait for an ACK.
-func (g *AsrsGateway) Publish(_ context.Context, evs []asrs.Event, at time.Time) error {
+func (g *AsrsGateway) Publish(ctx context.Context, evs []asrs.Event, at time.Time) error {
 	for _, e := range evs {
 		t := telegram.Telegram{ID: uuid.NewString(), Timestamp: at}
 		switch e.Kind {
@@ -190,7 +228,7 @@ func (g *AsrsGateway) Publish(_ context.Context, evs []asrs.Event, at time.Time)
 		case asrs.EventPortArrival:
 			t.Type, t.PortID, t.ContainerID = telegram.PortArrival, e.PortID, e.ContainerID
 		}
-		g.send(t, true)
+		g.send(ctx, t, true, false)
 	}
 	return nil
 }
@@ -204,14 +242,21 @@ func (g *AsrsGateway) RunRetransmit(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			resend, expired := g.retx.Due(g.wall())
-			for _, t := range resend {
-				g.send(t, false)
-			}
-			for _, t := range expired {
-				g.log.Warn("telegram never acknowledged", "telegramId", t.ID, "type", t.Type)
-			}
+			g.retransmitDue(ctx)
 		}
+	}
+}
+
+// retransmitDue resends the up telegrams whose ACK is overdue and gives up on
+// those out of attempts.
+func (g *AsrsGateway) retransmitDue(ctx context.Context) {
+	resend, expired := g.retx.Due(g.wall())
+	for _, t := range resend {
+		g.send(ctx, t, false, true)
+	}
+	for _, t := range expired {
+		metricsOrNoop(g.m).TelegramExpired(ctx, typeLabel(t.Type))
+		g.log.WarnContext(ctx, "telegram never acknowledged", "telegramId", t.ID, "type", t.Type)
 	}
 }
 
@@ -220,6 +265,13 @@ func (g *AsrsGateway) Close()          { g.client.Disconnect(250) }
 
 // AsrsRouter routes engine events to the gateway of each AS/RS.
 type AsrsRouter map[string]*AsrsGateway
+
+// SetMetrics installs m on every gateway; call it before Start.
+func (r AsrsRouter) SetMetrics(m Metrics) {
+	for _, g := range r {
+		g.SetMetrics(m)
+	}
+}
 
 func (r AsrsRouter) PublishEvents(ctx context.Context, asrsID string, evs []asrs.Event, at time.Time) error {
 	g, ok := r[asrsID]

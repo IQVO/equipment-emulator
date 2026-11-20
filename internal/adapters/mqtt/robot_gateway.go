@@ -3,14 +3,18 @@ package mqtt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/IQVO/equipment-emulator/internal/adapters/vda5050"
+	"github.com/IQVO/equipment-emulator/internal/application/engine"
 	"github.com/IQVO/equipment-emulator/internal/domain/robot"
 )
 
@@ -52,7 +56,12 @@ type RobotGateway struct {
 	now   func() time.Time // simulated time
 	log   *slog.Logger
 	ctx   handlerCtx // context for the reconnect handler, set by Start
+	m     Metrics    // nil records nothing; see SetMetrics
 }
+
+// SetMetrics installs the counters the gateway records (ADR 0005). Call it
+// before Start: the workers read it without a lock.
+func (g *RobotGateway) SetMetrics(m Metrics) { g.m = m }
 
 // NewRobotGateway connects one client per robot. now is the simulated clock;
 // the static last will is built here, so it carries the process-start
@@ -126,76 +135,125 @@ func (g *RobotGateway) startWorker(ctx context.Context, l *robotLink) {
 	go l.inbox.drain(ctx, func(ctx context.Context, m inbound) { g.dispatch(ctx, l, m) })
 }
 
-// dispatch hands one received message to the order or instantActions handler.
+// dispatch hands one received message to the order or instantActions
+// handler, inside a consumer span (the root of its trace: the payload carries
+// no trace context) that the engine's resulting publishes are children of.
 func (g *RobotGateway) dispatch(ctx context.Context, l *robotLink, m inbound) {
 	serial := l.id.SerialNumber
+	kind := "unexpected"
 	switch m.topic {
 	case vda5050.Topic(l.id.Manufacturer, serial, "order"):
-		g.onOrder(ctx, serial, m.payload)
+		kind = "order"
 	case vda5050.Topic(l.id.Manufacturer, serial, "instantActions"):
-		g.onInstantActions(ctx, serial, m.payload)
-	default:
-		g.log.Warn("message on an unexpected topic", "robot", serial, "topic", m.topic)
+		kind = "instantActions"
 	}
+	ctx, span := startSpan(ctx, "receive vda5050 "+kind, trace.SpanKindConsumer, m.topic,
+		attrSerial.String(serial), attrMessageType.String(kind))
+	var err error
+	switch kind {
+	case "order":
+		err = g.onOrder(ctx, serial, m.payload)
+	case "instantActions":
+		err = g.onInstantActions(ctx, serial, m.payload)
+	default:
+		g.log.WarnContext(ctx, "message on an unexpected topic", "robot", serial, "topic", m.topic)
+	}
+	endSpan(span, err)
 }
 
-func (g *RobotGateway) onOrder(ctx context.Context, serial string, payload []byte) {
+// onOrder applies one order and counts its outcome. It returns an error only
+// for a message the emulator could not handle (malformed, unsupported); a
+// rejection by the robot is a normal outcome, recorded on the span.
+func (g *RobotGateway) onOrder(ctx context.Context, serial string, payload []byte) error {
+	m := metricsOrNoop(g.m)
 	var o vda5050.Order
 	if err := json.Unmarshal(payload, &o); err != nil {
-		g.log.Warn("malformed order", "robot", serial, "err", err)
-		return
+		g.log.WarnContext(ctx, "malformed order", "robot", serial, "err", err)
+		m.OrderReceived(ctx, outcomeRejected, reasonMalformed)
+		return err
 	}
 	d, err := vda5050.ToOrder(o)
 	if err != nil {
-		g.log.Warn("unsupported order", "robot", serial, "err", err)
-		return
+		g.log.WarnContext(ctx, "unsupported order", "robot", serial, "err", err)
+		m.OrderReceived(ctx, outcomeRejected, reasonUnsupported)
+		return err
 	}
-	if err := g.cmds.HandleOrder(ctx, serial, d); err != nil {
-		g.log.Info("order rejected", "robot", serial, "orderId", o.OrderID, "err", err)
+	err = g.cmds.HandleOrder(ctx, serial, d)
+	outcome, reason := orderOutcome(err)
+	trace.SpanFromContext(ctx).SetAttributes(attribute.String("vda5050.order.id", o.OrderID),
+		attribute.String("outcome", outcome), attribute.String("reason", reason))
+	m.OrderReceived(ctx, outcome, reason)
+	if err != nil {
+		g.log.InfoContext(ctx, "order rejected", "robot", serial, "orderId", o.OrderID, "err", err)
+	}
+	return nil
+}
+
+// orderOutcome classifies HandleOrder's error. The robot's own refusal names
+// its VDA 5050 error type; a command dropped before the robot saw it names
+// why. Any other error can only come from publishing the resulting state,
+// after the order was accepted.
+func orderOutcome(err error) (outcome, reason string) {
+	var re *robot.RejectError
+	switch {
+	case err == nil:
+		return outcomeAccepted, ""
+	case errors.As(err, &re):
+		return outcomeRejected, re.Type
+	case errors.Is(err, engine.ErrRobotDisconnected):
+		return outcomeRejected, "ROBOT_DISCONNECTED"
+	case errors.Is(err, engine.ErrUnknownRobot):
+		return outcomeRejected, "UNKNOWN_ROBOT"
+	case errors.Is(err, ErrNotReady):
+		return outcomeRejected, ErrNotReady.Error()
+	default:
+		return outcomeAccepted, ""
 	}
 }
 
-func (g *RobotGateway) onInstantActions(ctx context.Context, serial string, payload []byte) {
+func (g *RobotGateway) onInstantActions(ctx context.Context, serial string, payload []byte) error {
 	var ia vda5050.InstantActions
 	if err := json.Unmarshal(payload, &ia); err != nil {
-		g.log.Warn("malformed instantActions", "robot", serial, "err", err)
-		return
+		g.log.WarnContext(ctx, "malformed instantActions", "robot", serial, "err", err)
+		return err
 	}
 	if err := g.cmds.HandleInstantActions(ctx, serial, vda5050.ToActions(ia.Actions)); err != nil {
-		g.log.Info("instant action rejected", "robot", serial, "err", err)
+		g.log.InfoContext(ctx, "instant action rejected", "robot", serial, "err", err)
 	}
+	return nil
 }
 
 func (g *RobotGateway) link(serial string) *robotLink { return g.links[serial] }
 
-func (g *RobotGateway) PublishState(_ context.Context, s robot.State, at time.Time) error {
+// send publishes one VDA 5050 message inside a producer span, a child of the
+// span in ctx (the order receive, the admin request or none for a tick).
+func (g *RobotGateway) send(ctx context.Context, l *robotLink, kind, topic string, retained bool, msg any) error {
+	_, span := startSpan(ctx, "publish vda5050 "+kind, trace.SpanKindProducer, topic,
+		attrSerial.String(l.id.SerialNumber), attrMessageType.String(kind))
+	b, err := json.Marshal(msg)
+	if err == nil {
+		err = publish(l.client, topic, retained, b)
+	}
+	endSpan(span, err)
+	return err
+}
+
+func (g *RobotGateway) PublishState(ctx context.Context, s robot.State, at time.Time) error {
 	l := g.link(s.SerialNumber)
 	topic := vda5050.Topic(l.id.Manufacturer, s.SerialNumber, "state")
-	b, err := json.Marshal(vda5050.FromState(s, l.header(topic, at)))
-	if err != nil {
-		return err
-	}
-	return publish(l.client, topic, false, b)
+	return g.send(ctx, l, "state", topic, false, vda5050.FromState(s, l.header(topic, at)))
 }
 
-func (g *RobotGateway) PublishConnection(_ context.Context, manufacturer, serial, state string, at time.Time) error {
+func (g *RobotGateway) PublishConnection(ctx context.Context, manufacturer, serial, state string, at time.Time) error {
 	l := g.link(serial)
 	topic := vda5050.Topic(manufacturer, serial, "connection")
-	b, err := json.Marshal(vda5050.Connection{Header: l.header(topic, at), ConnectionState: state})
-	if err != nil {
-		return err
-	}
-	return publish(l.client, topic, true, b)
+	return g.send(ctx, l, "connection", topic, true, vda5050.Connection{Header: l.header(topic, at), ConnectionState: state})
 }
 
-func (g *RobotGateway) PublishFactsheet(_ context.Context, f robot.Factsheet, at time.Time) error {
+func (g *RobotGateway) PublishFactsheet(ctx context.Context, f robot.Factsheet, at time.Time) error {
 	l := g.link(f.SerialNumber)
 	topic := vda5050.Topic(l.id.Manufacturer, f.SerialNumber, "factsheet")
-	b, err := json.Marshal(vda5050.FromFactsheet(f, l.header(topic, at)))
-	if err != nil {
-		return err
-	}
-	return publish(l.client, topic, true, b)
+	return g.send(ctx, l, "factsheet", topic, true, vda5050.FromFactsheet(f, l.header(topic, at)))
 }
 
 func (g *RobotGateway) Connected() bool {
