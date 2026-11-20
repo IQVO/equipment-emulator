@@ -1,4 +1,4 @@
-# Makefile — the local quality gate template (warehouse-harness-template v2).
+# Makefile — the local quality gate for equipment-emulator.
 #
 # Every target below mirrors a sensor in .github/workflows/ci.yml, so the
 # same feedback CI gives you post-push is available locally, pre-commit.
@@ -6,9 +6,7 @@
 # sensors left so an agent (or a human) can self-correct before code leaves
 # the machine.
 #
-# INSTANTIATING THIS TEMPLATE: replace every equipment-emulator, equipment-emulator
-# and robot placeholder -- `scripts/new-service.sh` does
-# this substitution for you. See HARNESS.md.
+# Scaffolded from warehouse-harness-template; see HARNESS.md for every sensor.
 
 GO                 ?= go
 GOLANGCI_LINT      ?= golangci-lint

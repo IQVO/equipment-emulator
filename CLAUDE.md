@@ -3,8 +3,8 @@
 `equipment-emulator` (GitHub org `IQVO`, Go module github.com/IQVO/equipment-emulator, scaffolded from
 warehouse-harness-template) is test infrastructure standing in for ISA-95 levels 1 and 0 of the WCS tier:
 AMR robots (VDA 5050 v3) and an AS/RS PLC (telegram protocol v1). Not a bounded context: no Kafka, no
-Postgres, no CloudEvents. Its richest aggregate is package `robot`; binaries live under cmd/ (added by later
-tasks).
+Postgres, no CloudEvents. Its richest aggregate is package `robot`; the one binary is `cmd/emulator`. Longer
+description: `SPEC.md`.
 
 ## Hard rules (each one cost an incident or is fitness-tested)
 
@@ -39,7 +39,8 @@ make guide-lint   # these guides: skills load, references resolve, context budge
 make harness-test # unit-test the agent hooks
 ```
 
-Binaries and their env vars/ports are documented here as each cmd/ binary lands (later tasks).
+`cmd/emulator` reads `WORLD_FILE` (required), `MQTT_URL` (`tcp://localhost:1883`), `HTTP_ADDR` (`:8080`),
+`SIM_SPEED` (`1`) and `TICK_INTERVAL` (`100ms`); see README.md and `config/world.example.yaml`.
 
 ## Where things are written down (read before editing the matching area)
 
