@@ -132,6 +132,9 @@ channels:
       description: |
         Every telegram other than ACK is answered with an ACK on the up topic.
         A repeated telegramId is not processed again; the first ACK is resent.
+        A jobId is never reusable within the emulator's process lifetime: a
+        STORE, RETRIEVE or MOVE reusing one is refused with DUPLICATE_JOB, even
+        after that job is done, failed or cancelled.
       tags: [{name: asrs}]
       message:
         oneOf:
@@ -153,7 +156,8 @@ channels:
       description: |
         Unacknowledged telegrams are retransmitted with the same telegramId after
         2 s, at most 3 times. An accepted job ends in exactly one JOB_DONE or
-        JOB_FAILED; a RETRIEVE's JOB_DONE is followed by a PORT_ARRIVAL.
+        JOB_FAILED; a RETRIEVE's JOB_DONE is followed by a PORT_ARRIVAL. Only
+        output ports emit PORT_ARRIVAL; input ports emit none.
       tags: [{name: asrs}]
       message:
         oneOf:

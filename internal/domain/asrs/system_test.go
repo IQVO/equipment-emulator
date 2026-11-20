@@ -238,3 +238,10 @@ func TestUnitStatesListsEveryAisle(t *testing.T) {
 		}
 	}
 }
+
+func TestSetNoReadRejectsAnInputPort(t *testing.T) {
+	s := newSys(t, false)
+	if got := reason(t, s.SetNoRead("IN1", true)); got != ReasonWrongPortKind {
+		t.Fatalf("no-read on an input port: %s", got)
+	}
+}

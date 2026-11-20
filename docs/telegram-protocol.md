@@ -62,6 +62,19 @@ slot is occupied), `PORT_OCCUPIED`. A cancelled queued job produces no
 JOB_FAILED; the ACK of the CANCEL is the outcome. A RETRIEVE's JOB_DONE is
 followed by a PORT_ARRIVAL at its output port.
 
+## Contract decisions
+
+These are fixed before `asrs-control` binds to the protocol:
+
+- Input ports emit no PORT_ARRIVAL. Only a RETRIEVE's arrival at an output port
+  is reported (and read); a container a robot drops on an input port is simply
+  there for the next STORE.
+- A `jobId` is never reusable within the emulator's process lifetime: a STORE,
+  RETRIEVE or MOVE with a `jobId` seen before is refused with `DUPLICATE_JOB`,
+  even after that job ended in JOB_DONE or JOB_FAILED or was cancelled.
+- The no-read fault (admin API `ASRS_NO_READ`) applies to output ports only;
+  naming an input port is refused with `WRONG_PORT_KIND`.
+
 ## Emulator simplifications
 
 One combined shuttle-and-lift unit per aisle; jobs run one at a time per aisle

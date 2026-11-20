@@ -185,9 +185,12 @@ func (s *System) SetUnitFault(aisle int, on bool) error {
 	return nil
 }
 
+// SetNoRead switches the barcode no-read fault of an output port. Only a
+// RETRIEVE's arrival at an output port is read, so an input port is refused
+// with WRONG_PORT_KIND rather than accepted for a fault that never fires.
 func (s *System) SetNoRead(portID string, on bool) error {
-	if _, ok := s.portDef[portID]; !ok {
-		return &RejectError{ReasonUnknownPort}
+	if _, err := s.port(portID, PortOutput); err != nil {
+		return err
 	}
 	s.noRead[portID] = on
 	return nil

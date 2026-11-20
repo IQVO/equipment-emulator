@@ -299,3 +299,12 @@ func TestHandleInstantActionsPublishesFactsheetAndState(t *testing.T) {
 		t.Fatalf("want ErrUnknownRobot, got %v", err)
 	}
 }
+
+func TestNoReadFaultOnInputPortIsRefused(t *testing.T) {
+	e, _ := newEngine(t)
+	err := e.InjectFault(context.Background(), Fault{Kind: FaultAsrsNoRead, Target: "ASRS1", Port: "IN1", Active: true})
+	var re *asrs.RejectError
+	if !errors.As(err, &re) || re.Reason != asrs.ReasonWrongPortKind {
+		t.Fatalf("err = %v, want WRONG_PORT_KIND", err)
+	}
+}
