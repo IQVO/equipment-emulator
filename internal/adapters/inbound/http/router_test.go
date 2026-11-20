@@ -3,6 +3,8 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -42,6 +44,8 @@ func (f *fakeAdmin) PlaceAtPort(string, string, string) error {
 	return &asrs.RejectError{Reason: asrs.ReasonPortOccupied}
 }
 
+func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
 func do(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
@@ -50,7 +54,7 @@ func do(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 
 func TestRoutes(t *testing.T) {
 	a := &fakeAdmin{}
-	h := NewRouter(a, func() bool { return false })
+	h := NewRouter(a, func() bool { return false }, quietLogger(), "equipment-emulator")
 	if r := do(h, "GET", "/healthz", ""); r.Code != 200 {
 		t.Fatalf("healthz %d", r.Code)
 	}
@@ -81,7 +85,7 @@ func TestRoutes(t *testing.T) {
 }
 
 func TestGetAsrsBodyMatchesTheOpenAPIShape(t *testing.T) {
-	h := NewRouter(&fakeAdmin{}, func() bool { return true })
+	h := NewRouter(&fakeAdmin{}, func() bool { return true }, quietLogger(), "equipment-emulator")
 	r := do(h, "GET", "/asrs/ASRS1", "")
 	if r.Code != 200 || r.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("asrs %d %s", r.Code, r.Header())

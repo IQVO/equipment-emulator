@@ -338,23 +338,3 @@ func (e *Engine) InjectFault(ctx context.Context, f Fault) error {
 		return fmt.Errorf("unknown fault kind %q", f.Kind)
 	}
 }
-
-func (e *Engine) Robots() []robot.State {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]robot.State, 0, len(e.serials))
-	for _, s := range e.serials {
-		out = append(out, e.robots[s].Snapshot())
-	}
-	return out
-}
-
-func (e *Engine) Asrs(id string) (asrs.View, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	s, ok := e.systems[id]
-	if !ok {
-		return asrs.View{}, false
-	}
-	return s.Snapshot(), true
-}

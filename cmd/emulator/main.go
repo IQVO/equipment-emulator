@@ -20,7 +20,8 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := newLogger(os.Stdout)
+	slog.SetDefault(log) // the OTel SDK's own diagnostics go through slog.Default
 	if err := run(log); err != nil {
 		log.Error("emulator stopped", "err", err)
 		os.Exit(1)
@@ -34,6 +35,12 @@ func run(log *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	tcfg := loadTelemetryEnv(os.Getenv)
+	flush, err := startTelemetry(log, tcfg)
+	if err != nil {
+		return err
+	}
+	defer flush()
 
 	// Simulated time starts at the process start; every published timestamp is
 	// simulated time (at SIM_SPEED 1 it tracks wall time).
@@ -62,6 +69,7 @@ func run(log *slog.Logger) error {
 	}
 	eng := engine.New(clock, robots, systems, nodes, rg, router)
 	px.set(eng)
+	instrument(log, eng, clock, rg, router)
 
 	if err := startGateways(ctx, rg, router); err != nil {
 		return err
@@ -71,7 +79,7 @@ func run(log *slog.Logger) error {
 	}
 
 	ready := func() bool { return connected(rg, router) }
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: adminhttp.NewRouter(eng, ready), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: adminhttp.NewRouter(eng, ready, log, tcfg.serviceName), ReadHeaderTimeout: 5 * time.Second}
 	log.Info("emulator running", "robots", len(robots), "asrs", len(systems), "simSpeed", cfg.SimSpeed)
 	step := simclock.Scale(cfg.TickInterval, cfg.SimSpeed)
 	return serve(ctx, srv, cfg.TickInterval, func() {

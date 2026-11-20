@@ -5,9 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
+	otelchimetric "github.com/riandyrn/otelchi/metric"
+
+	"github.com/IQVO/equipment-emulator/internal/adapters/inbound/requestlog"
 
 	"github.com/IQVO/equipment-emulator/internal/application/engine"
 	"github.com/IQVO/equipment-emulator/internal/domain/asrs"
@@ -170,9 +176,20 @@ func done(w http.ResponseWriter, err error) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func NewRouter(a Admin, ready func() bool) http.Handler {
+// NewRouter builds the admin API. The middleware order is the fleet's
+// (ADR 0005): request id, the otelchi server span, the HTTP RED metrics, the
+// access log, then chi's panic recoverer. Build it after telemetry is set up:
+// otelchimetric binds the global MeterProvider here.
+func NewRouter(a Admin, ready func() bool, logger *slog.Logger, serviceName string) http.Handler {
 	h := handlers{a}
 	r := chi.NewRouter()
+	metricCfg := otelchimetric.NewBaseConfig(serviceName)
+	r.Use(middleware.RequestID)
+	r.Use(otelchi.Middleware(serviceName, otelchi.WithChiRoutes(r)))
+	r.Use(otelchimetric.NewServerRequestDuration(metricCfg))
+	r.Use(otelchimetric.NewServerActiveRequests(metricCfg))
+	r.Use(requestlog.RequestLogger(logger))
+	r.Use(middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if !ready() {
