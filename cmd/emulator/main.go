@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -69,27 +70,37 @@ func run(log *slog.Logger) error {
 
 	ready := func() bool { return connected(rg, router) }
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: adminhttp.NewRouter(eng, ready), ReadHeaderTimeout: 5 * time.Second}
+	log.Info("emulator running", "robots", len(robots), "asrs", len(systems), "simSpeed", cfg.SimSpeed)
+	step := simclock.Scale(cfg.TickInterval, cfg.SimSpeed)
+	return serve(ctx, srv, cfg.TickInterval, func() {
+		if err := eng.Step(ctx, step); err != nil {
+			log.Warn("step", "err", err)
+		}
+	})
+}
+
+// serve runs srv and calls onTick every interval until ctx is done or the
+// server fails. A listen failure is returned (so the process exits non-zero);
+// a signal-driven stop returns the graceful shutdown's result.
+func serve(ctx context.Context, srv *http.Server, interval time.Duration, onTick func()) error {
+	serveErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("http", "err", err)
-			stop()
+			serveErr <- err
 		}
 	}()
-
-	tick := time.NewTicker(cfg.TickInterval)
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	step := simclock.Scale(cfg.TickInterval, cfg.SimSpeed)
-	log.Info("emulator running", "robots", len(robots), "asrs", len(systems), "simSpeed", cfg.SimSpeed)
 	for {
 		select {
+		case err := <-serveErr:
+			return fmt.Errorf("http server: %w", err)
 		case <-ctx.Done():
 			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			return srv.Shutdown(shutdown)
 		case <-tick.C:
-			if err := eng.Step(ctx, step); err != nil {
-				log.Warn("step", "err", err)
-			}
+			onTick()
 		}
 	}
 }
