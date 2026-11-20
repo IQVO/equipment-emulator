@@ -34,6 +34,14 @@ whenever 30 s of simulated time have passed since that robot's last state (VDA
 5050 v3 §6.6: "at least every 30 seconds"; at `SIM_SPEED` 10 that is every 3 s
 of wall time). A fault-disconnected robot publishes nothing.
 
+A robot fault-disconnected through the admin API (`ROBOT_DISCONNECT`) behaves
+as if it were off the network: it publishes nothing (no state, no re-announce
+after an MQTT reconnect) and drops every `order` and `instantActions` message
+it receives (logged by the emulator, not reported) until the fault is cleared.
+
+Messages to one robot (`order` and `instantActions` together) are handled one
+at a time in arrival order.
+
 Node actions: `pick` (parameter `loadId`), `drop`, `startCharging`,
 `stopCharging`. Instant actions: `cancelOrder`, `startCharging`,
 `stopCharging`, `stateRequest`, `factsheetRequest`. Action progress is reported
