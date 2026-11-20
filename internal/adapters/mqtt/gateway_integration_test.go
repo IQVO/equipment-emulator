@@ -137,6 +137,13 @@ func (p cmdsProxy) HandleInstantActions(ctx context.Context, s string, as []robo
 	return (*p.e).HandleInstantActions(ctx, s, as)
 }
 
+func (p cmdsProxy) AnnounceRobot(ctx context.Context, s string) error {
+	if *p.e == nil {
+		return errNoEngine
+	}
+	return (*p.e).AnnounceRobot(ctx, s)
+}
+
 type asrsProxy struct{ e **engine.Engine }
 
 func (p asrsProxy) SubmitJob(id string, j asrs.Job) error {

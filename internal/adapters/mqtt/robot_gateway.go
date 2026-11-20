@@ -19,6 +19,9 @@ type RobotIdentity struct{ Manufacturer, SerialNumber string }
 type RobotCommands interface {
 	HandleOrder(ctx context.Context, serial string, o robot.Order) error
 	HandleInstantActions(ctx context.Context, serial string, as []robot.Action) error
+	// AnnounceRobot republishes one robot's ONLINE, factsheet and state, unless
+	// the robot is fault-disconnected.
+	AnnounceRobot(ctx context.Context, serial string) error
 }
 
 type robotLink struct {
@@ -57,7 +60,7 @@ func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommand
 					log.Warn("resubscribe failed", "robot", r.SerialNumber, "err", err)
 				}
 				if connects.Add(1) > 1 {
-					g.reannounce(c, l)
+					g.reannounce(l)
 				}
 			})
 		if err != nil {
@@ -70,28 +73,13 @@ func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommand
 	return g, nil
 }
 
-// Announcer is implemented by an engine that can republish every robot's
-// connection, factsheet and state.
-type Announcer interface {
-	Announce(ctx context.Context) error
-}
-
 // reannounce runs after a reconnect: the broker still holds the retained
-// CONNECTION_BROKEN will, so say ONLINE again and republish the factsheet.
-func (g *RobotGateway) reannounce(c pahomqtt.Client, l *robotLink) {
-	ctx := g.ctx.get()
-	topic := vda5050.Topic(l.id.Manufacturer, l.id.SerialNumber, "connection")
-	b, err := json.Marshal(vda5050.Connection{Header: l.header(topic, time.Now()), ConnectionState: vda5050.ConnectionOnline})
-	if err == nil {
-		err = publish(c, topic, true, b)
-	}
-	if err != nil {
-		g.log.Warn("cannot republish ONLINE", "robot", l.id.SerialNumber, "err", err)
-	}
-	if a, ok := g.cmds.(Announcer); ok {
-		if err := a.Announce(ctx); err != nil {
-			g.log.Warn("re-announce failed", "robot", l.id.SerialNumber, "err", err)
-		}
+// CONNECTION_BROKEN will, so the robot says ONLINE again and republishes its
+// factsheet and state. It goes through the engine so that a fault-disconnected
+// robot stays silent (the engine's guard applies).
+func (g *RobotGateway) reannounce(l *robotLink) {
+	if err := g.cmds.AnnounceRobot(g.ctx.get(), l.id.SerialNumber); err != nil {
+		g.log.Warn("re-announce failed", "robot", l.id.SerialNumber, "err", err)
 	}
 }
 

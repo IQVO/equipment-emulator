@@ -308,3 +308,48 @@ func TestNoReadFaultOnInputPortIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want WRONG_PORT_KIND", err)
 	}
 }
+
+func TestFaultDisconnectedRobotDropsCommands(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	if err := e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	states := len(rec.states)
+	if err := e.HandleOrder(ctx, "R1", moveOrder()); !errors.Is(err, ErrRobotDisconnected) {
+		t.Fatalf("order: err = %v, want ErrRobotDisconnected", err)
+	}
+	if err := e.HandleInstantActions(ctx, "R1", []robot.Action{{ID: "c", Type: "startCharging"}}); !errors.Is(err, ErrRobotDisconnected) {
+		t.Fatalf("instant actions: err = %v, want ErrRobotDisconnected", err)
+	}
+	s := e.Robots()[0]
+	if s.OrderID != "" || s.Charging || len(s.InstantActionStates) != 0 || len(rec.states) != states {
+		t.Fatalf("a disconnected robot executed a command: %+v", s)
+	}
+	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: false})
+	if err := e.HandleOrder(ctx, "R1", moveOrder()); err != nil {
+		t.Fatalf("after reconnect: %v", err)
+	}
+}
+
+func TestAnnounceRobotRespectsFaultDisconnect(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	if err := e.AnnounceRobot(ctx, "R1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.connections) != 1 || rec.connections[0] != "R1:ONLINE" || rec.factsheets != 1 || len(rec.states) != 1 {
+		t.Fatalf("announce one: %+v", rec)
+	}
+	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: true})
+	conns, sheets, states := len(rec.connections), rec.factsheets, len(rec.states)
+	if err := e.AnnounceRobot(ctx, "R1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.connections) != conns || rec.factsheets != sheets || len(rec.states) != states {
+		t.Fatalf("announced a fault-disconnected robot: %+v", rec)
+	}
+	if err := e.AnnounceRobot(ctx, "NOPE"); !errors.Is(err, ErrUnknownRobot) {
+		t.Fatalf("err = %v", err)
+	}
+}

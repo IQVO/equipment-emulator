@@ -20,6 +20,9 @@ import (
 var (
 	ErrUnknownRobot = errors.New("unknown robot")
 	ErrUnknownAsrs  = errors.New("unknown asrs")
+	// ErrRobotDisconnected: the robot is fault-disconnected (ROBOT_DISCONNECT)
+	// and drops every command, as a robot off the network would never see it.
+	ErrRobotDisconnected = errors.New("robot is fault-disconnected")
 )
 
 type RobotPublisher interface {
@@ -115,18 +118,33 @@ func (p peripherals) Drop(nodeID, loadID string) error {
 func (e *Engine) Announce(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	now := e.clock.Now()
 	var errs []error
 	for _, s := range e.serials {
-		if e.disconnected[s] {
-			continue
-		}
-		r := e.robots[s]
-		st := r.Snapshot()
-		errs = append(errs, e.rp.PublishConnection(ctx, st.Manufacturer, s, connOnline, now),
-			e.rp.PublishFactsheet(ctx, r.Factsheet(), now), e.publishState(ctx, s, true, now))
+		errs = append(errs, e.announce(ctx, s))
 	}
 	return errors.Join(errs...)
+}
+
+// AnnounceRobot is Announce for one robot (its MQTT client reconnected). The
+// fault-disconnect guard applies: a fault-disconnected robot stays silent.
+func (e *Engine) AnnounceRobot(ctx context.Context, serial string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, err := e.robot(serial); err != nil {
+		return err
+	}
+	return e.announce(ctx, serial)
+}
+
+// announce publishes one robot's ONLINE, factsheet and state. The caller holds e.mu.
+func (e *Engine) announce(ctx context.Context, serial string) error {
+	if e.disconnected[serial] {
+		return nil
+	}
+	now := e.clock.Now()
+	r := e.robots[serial]
+	return errors.Join(e.rp.PublishConnection(ctx, r.Snapshot().Manufacturer, serial, connOnline, now),
+		e.rp.PublishFactsheet(ctx, r.Factsheet(), now), e.publishState(ctx, serial, true, now))
 }
 
 func (e *Engine) publishState(ctx context.Context, serial string, force bool, now time.Time) error {
@@ -175,11 +193,24 @@ func (e *Engine) system(id string) (*asrs.System, error) {
 	return s, nil
 }
 
+// commandable returns the robot a command is for; a fault-disconnected robot
+// drops it with ErrRobotDisconnected. The caller holds e.mu.
+func (e *Engine) commandable(serial string) (*robot.Robot, error) {
+	r, err := e.robot(serial)
+	if err != nil {
+		return nil, err
+	}
+	if e.disconnected[serial] {
+		return nil, fmt.Errorf("%w: %s", ErrRobotDisconnected, serial)
+	}
+	return r, nil
+}
+
 // HandleOrder applies a VDA 5050 order and publishes the resulting state at once.
 func (e *Engine) HandleOrder(ctx context.Context, serial string, o robot.Order) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	r, err := e.robot(serial)
+	r, err := e.commandable(serial)
 	if err != nil {
 		return err
 	}
@@ -191,7 +222,7 @@ func (e *Engine) HandleOrder(ctx context.Context, serial string, o robot.Order) 
 func (e *Engine) HandleInstantActions(ctx context.Context, serial string, as []robot.Action) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	r, err := e.robot(serial)
+	r, err := e.commandable(serial)
 	if err != nil {
 		return err
 	}

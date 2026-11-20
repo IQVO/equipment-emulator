@@ -15,7 +15,7 @@ func TestProxyReturnsErrorsBeforeEngineIsSet(t *testing.T) {
 	errs := []error{
 		p.HandleOrder(ctx, "R1", robot.Order{}),
 		p.HandleInstantActions(ctx, "R1", nil),
-		p.Announce(ctx),
+		p.AnnounceRobot(ctx, "R1"),
 		p.SubmitJob("A", asrs.Job{}),
 		p.CancelJob("A", "J"),
 		p.UnitStates(ctx, "A"),

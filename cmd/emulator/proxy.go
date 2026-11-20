@@ -34,12 +34,12 @@ func (p *proxy) HandleInstantActions(ctx context.Context, s string, as []robot.A
 	return e.HandleInstantActions(ctx, s, as)
 }
 
-func (p *proxy) Announce(ctx context.Context) error {
+func (p *proxy) AnnounceRobot(ctx context.Context, serial string) error {
 	e := p.e.Load()
 	if e == nil {
 		return errNoEngine
 	}
-	return e.Announce(ctx)
+	return e.AnnounceRobot(ctx, serial)
 }
 
 func (p *proxy) SubmitJob(id string, j asrs.Job) error {
