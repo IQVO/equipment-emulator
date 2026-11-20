@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
@@ -40,41 +41,79 @@ type RobotGateway struct {
 	links map[string]*robotLink
 	cmds  RobotCommands
 	log   *slog.Logger
+	ctx   handlerCtx // context for handlers, set by Start
 }
 
 func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommands, log *slog.Logger) (*RobotGateway, error) {
 	g := &RobotGateway{links: map[string]*robotLink{}, cmds: cmds, log: log}
+	g.ctx.set(context.Background())
 	for _, r := range robots {
+		l := &robotLink{id: r, headers: map[string]uint32{}}
 		will, _ := json.Marshal(vda5050.Connection{Header: vda5050.NewHeader(0, time.Now(), r.Manufacturer, r.SerialNumber), ConnectionState: vda5050.ConnectionBroken})
-		c, err := Connect(brokerURL, "emu-robot-"+r.SerialNumber, &Will{Topic: vda5050.Topic(r.Manufacturer, r.SerialNumber, "connection"), Payload: will})
+		var connects atomic.Int32
+		c, err := Connect(brokerURL, "emu-robot-"+r.SerialNumber, &Will{Topic: vda5050.Topic(r.Manufacturer, r.SerialNumber, "connection"), Payload: will},
+			func(c pahomqtt.Client) {
+				if err := g.subscribeRobot(c, l); err != nil {
+					log.Warn("resubscribe failed", "robot", r.SerialNumber, "err", err)
+				}
+				if connects.Add(1) > 1 {
+					g.reannounce(c, l)
+				}
+			})
 		if err != nil {
 			g.Close()
 			return nil, err
 		}
-		g.links[r.SerialNumber] = &robotLink{id: r, client: c, headers: map[string]uint32{}}
+		l.client = c
+		g.links[r.SerialNumber] = l
 	}
 	return g, nil
 }
 
-// Start subscribes to every robot's order and instantActions topics.
-func (g *RobotGateway) Start(ctx context.Context) error {
-	for serial, l := range g.links {
-		orderTopic := vda5050.Topic(l.id.Manufacturer, serial, "order")
-		if err := subscribe(l.client, orderTopic, func(payload []byte) { g.onOrder(ctx, serial, payload) }); err != nil {
-			return err
+// Announcer is implemented by an engine that can republish every robot's
+// connection, factsheet and state.
+type Announcer interface {
+	Announce(ctx context.Context) error
+}
+
+// reannounce runs after a reconnect: the broker still holds the retained
+// CONNECTION_BROKEN will, so say ONLINE again and republish the factsheet.
+func (g *RobotGateway) reannounce(c pahomqtt.Client, l *robotLink) {
+	ctx := g.ctx.get()
+	topic := vda5050.Topic(l.id.Manufacturer, l.id.SerialNumber, "connection")
+	b, err := json.Marshal(vda5050.Connection{Header: l.header(topic, time.Now()), ConnectionState: vda5050.ConnectionOnline})
+	if err == nil {
+		err = publish(c, topic, true, b)
+	}
+	if err != nil {
+		g.log.Warn("cannot republish ONLINE", "robot", l.id.SerialNumber, "err", err)
+	}
+	if a, ok := g.cmds.(Announcer); ok {
+		if err := a.Announce(ctx); err != nil {
+			g.log.Warn("re-announce failed", "robot", l.id.SerialNumber, "err", err)
 		}
-		iaTopic := vda5050.Topic(l.id.Manufacturer, serial, "instantActions")
-		if err := subscribe(l.client, iaTopic, func(payload []byte) { g.onInstantActions(ctx, serial, payload) }); err != nil {
+	}
+}
+
+func (g *RobotGateway) subscribeRobot(c pahomqtt.Client, l *robotLink) error {
+	serial := l.id.SerialNumber
+	ctx := func() context.Context { return g.ctx.get() }
+	if err := subscribe(c, vda5050.Topic(l.id.Manufacturer, serial, "order"), func(p []byte) { g.onOrder(ctx(), serial, p) }); err != nil {
+		return err
+	}
+	return subscribe(c, vda5050.Topic(l.id.Manufacturer, serial, "instantActions"), func(p []byte) { g.onInstantActions(ctx(), serial, p) })
+}
+
+// Start subscribes to every robot's order and instantActions topics (they are
+// subscribed again on every reconnect).
+func (g *RobotGateway) Start(ctx context.Context) error {
+	g.ctx.set(ctx)
+	for _, l := range g.links {
+		if err := g.subscribeRobot(l.client, l); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func subscribe(c pahomqtt.Client, topic string, h func(payload []byte)) error {
-	tok := c.Subscribe(topic, 1, func(_ pahomqtt.Client, m pahomqtt.Message) { h(m.Payload()) })
-	tok.Wait()
-	return tok.Error()
 }
 
 func (g *RobotGateway) onOrder(ctx context.Context, serial string, payload []byte) {

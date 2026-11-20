@@ -5,6 +5,7 @@ package mqtt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -74,7 +75,7 @@ func TestRobotAndAsrsOverMQTT(t *testing.T) {
 	}
 
 	// a WCS-side test client
-	wcs, err := Connect(url, "test-wcs", nil)
+	wcs, err := Connect(url, "test-wcs", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,19 +125,40 @@ func TestRobotAndAsrsOverMQTT(t *testing.T) {
 type cmdsProxy struct{ e **engine.Engine }
 
 func (p cmdsProxy) HandleOrder(ctx context.Context, s string, o robot.Order) error {
+	if *p.e == nil {
+		return errNoEngine
+	}
 	return (*p.e).HandleOrder(ctx, s, o)
 }
 func (p cmdsProxy) HandleInstantActions(ctx context.Context, s string, as []robot.Action) error {
+	if *p.e == nil {
+		return errNoEngine
+	}
 	return (*p.e).HandleInstantActions(ctx, s, as)
 }
 
 type asrsProxy struct{ e **engine.Engine }
 
-func (p asrsProxy) SubmitJob(id string, j asrs.Job) error { return (*p.e).SubmitJob(id, j) }
-func (p asrsProxy) CancelJob(id, job string) error        { return (*p.e).CancelJob(id, job) }
+func (p asrsProxy) SubmitJob(id string, j asrs.Job) error {
+	if *p.e == nil {
+		return errNoEngine
+	}
+	return (*p.e).SubmitJob(id, j)
+}
+func (p asrsProxy) CancelJob(id, job string) error {
+	if *p.e == nil {
+		return errNoEngine
+	}
+	return (*p.e).CancelJob(id, job)
+}
 func (p asrsProxy) UnitStates(ctx context.Context, id string) error {
+	if *p.e == nil {
+		return errNoEngine
+	}
 	return (*p.e).UnitStates(ctx, id)
 }
+
+var errNoEngine = errors.New("engine not ready")
 
 func asrsPos(level, slot int) asrs.Position {
 	return asrs.Position{Aisle: 1, Level: level, Slot: slot, Depth: 1}

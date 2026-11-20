@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
@@ -28,15 +29,30 @@ type AsrsGateway struct {
 	retx   *telegram.Retransmitter
 	now    func() time.Time
 	log    *slog.Logger
+	mu     sync.Mutex // serialises handle
+	pub    func(topic string, payload []byte) error
+	ctx    handlerCtx // context for handlers, set by Start
 }
 
 func NewAsrsGateway(brokerURL, asrsID string, cmds AsrsCommands, now func() time.Time, log *slog.Logger) (*AsrsGateway, error) {
-	c, err := Connect(brokerURL, "emu-asrs-"+asrsID, nil)
+	g := &AsrsGateway{asrsID: asrsID, cmds: cmds, dedup: telegram.NewDedup(1000),
+		retx: telegram.NewRetransmitter(2*time.Second, 3), now: now, log: log}
+	g.ctx.set(context.Background())
+	g.pub = func(topic string, b []byte) error { return publish(g.client, topic, false, b) }
+	c, err := Connect(brokerURL, "emu-asrs-"+asrsID, nil, func(c pahomqtt.Client) {
+		if err := g.subscribeDown(c); err != nil {
+			log.Warn("resubscribe failed", "asrs", asrsID, "err", err)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &AsrsGateway{asrsID: asrsID, client: c, cmds: cmds, dedup: telegram.NewDedup(1000),
-		retx: telegram.NewRetransmitter(2*time.Second, 3), now: now, log: log}, nil
+	g.client = c
+	return g, nil
+}
+
+func (g *AsrsGateway) subscribeDown(c pahomqtt.Client) error {
+	return subscribe(c, telegram.DownTopic(g.asrsID), func(p []byte) { g.handle(g.ctx.get(), p) })
 }
 
 func pos(p *telegram.Position) asrs.Position {
@@ -52,7 +68,7 @@ func (g *AsrsGateway) send(t telegram.Telegram, track bool) {
 		g.log.Error("cannot encode telegram", "type", t.Type, "err", err)
 		return
 	}
-	if err := publish(g.client, telegram.UpTopic(g.asrsID), false, b); err != nil {
+	if err := g.pub(telegram.UpTopic(g.asrsID), b); err != nil {
 		g.log.Warn("publish failed; the retransmitter will retry", "telegramId", t.ID, "err", err)
 	}
 	if track {
@@ -60,22 +76,44 @@ func (g *AsrsGateway) send(t telegram.Telegram, track bool) {
 	}
 }
 
+// handle serialises the processing of down telegrams: the client delivers
+// messages concurrently (OrderMatters is off), but a STORE and a later CANCEL
+// of one job must not be reordered, and Lookup then Remember must be atomic.
 func (g *AsrsGateway) handle(ctx context.Context, payload []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	reply, afterAck := g.process(ctx, payload)
+	if reply != nil {
+		g.send(*reply, false)
+	}
+	if afterAck != nil {
+		afterAck()
+	}
+}
+
+// process decodes one down telegram, applies it through the commands and
+// returns the telegram to send back (nil for none) plus work to run after
+// that reply went out. The caller must hold g.mu.
+func (g *AsrsGateway) process(ctx context.Context, payload []byte) (reply *telegram.Telegram, afterAck func()) {
 	t, err := telegram.Decode(payload)
 	if err != nil {
 		g.log.Warn("malformed telegram", "err", err)
-		if t.ID != "" {
-			g.send(telegram.NewAck(t, errors.New("MALFORMED"), uuid.NewString(), g.now()), false)
+		if t.ID == "" {
+			return nil, nil
 		}
-		return
+		if nack, seen := g.dedup.Lookup(t.ID); seen {
+			return &nack, nil
+		}
+		nack := telegram.NewAck(t, errors.New("MALFORMED"), uuid.NewString(), g.now())
+		g.dedup.Remember(t.ID, nack)
+		return &nack, nil
 	}
 	if t.Type == telegram.Ack {
 		g.retx.Ack(t.AckOf)
-		return
+		return nil, nil
 	}
 	if ack, seen := g.dedup.Lookup(t.ID); seen {
-		g.send(ack, false)
-		return
+		return &ack, nil
 	}
 	var cmdErr error
 	switch t.Type {
@@ -88,7 +126,7 @@ func (g *AsrsGateway) handle(ctx context.Context, payload []byte) {
 	case telegram.Cancel:
 		cmdErr = g.cmds.CancelJob(g.asrsID, t.JobID)
 	case telegram.StateRequest:
-		defer func() { _ = g.cmds.UnitStates(ctx, g.asrsID) }()
+		afterAck = func() { _ = g.cmds.UnitStates(ctx, g.asrsID) }
 	default:
 		cmdErr = errors.New("MALFORMED")
 	}
@@ -98,14 +136,13 @@ func (g *AsrsGateway) handle(ctx context.Context, payload []byte) {
 	}
 	ack := telegram.NewAck(t, cmdErr, uuid.NewString(), g.now())
 	g.dedup.Remember(t.ID, ack)
-	g.send(ack, false)
+	return &ack, afterAck
 }
 
-// Start subscribes to the down topic.
+// Start subscribes to the down topic (and again on every reconnect).
 func (g *AsrsGateway) Start(ctx context.Context) error {
-	tok := g.client.Subscribe(telegram.DownTopic(g.asrsID), 1, func(_ pahomqtt.Client, m pahomqtt.Message) { g.handle(ctx, m.Payload()) })
-	tok.Wait()
-	return tok.Error()
+	g.ctx.set(ctx)
+	return g.subscribeDown(g.client)
 }
 
 // Publish turns PLC events into up telegrams that wait for an ACK.
