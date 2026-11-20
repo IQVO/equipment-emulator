@@ -29,6 +29,11 @@ type robotLink struct {
 	client  pahomqtt.Client
 	mu      sync.Mutex
 	headers map[string]uint32 // per topic
+	inbox   *inbox            // order and instantActions, in arrival order across both topics
+}
+
+func newRobotLink(id RobotIdentity, log *slog.Logger) *robotLink {
+	return &robotLink{id: id, headers: map[string]uint32{}, inbox: newInbox(InboxSize, "robot "+id.SerialNumber, log)}
 }
 
 func (l *robotLink) header(topic string, at time.Time) vda5050.Header {
@@ -44,17 +49,17 @@ type RobotGateway struct {
 	links map[string]*robotLink
 	cmds  RobotCommands
 	log   *slog.Logger
-	ctx   handlerCtx // context for handlers, set by Start
+	ctx   handlerCtx // context for the reconnect handler, set by Start
 }
 
+// NewRobotGateway connects one client per robot.
 func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommands, log *slog.Logger) (*RobotGateway, error) {
 	g := &RobotGateway{links: map[string]*robotLink{}, cmds: cmds, log: log}
 	g.ctx.set(context.Background())
 	for _, r := range robots {
-		l := &robotLink{id: r, headers: map[string]uint32{}}
-		will, _ := json.Marshal(vda5050.Connection{Header: vda5050.NewHeader(0, time.Now(), r.Manufacturer, r.SerialNumber), ConnectionState: vda5050.ConnectionBroken})
+		l := newRobotLink(r, log)
 		var connects atomic.Int32
-		c, err := Connect(brokerURL, "emu-robot-"+r.SerialNumber, &Will{Topic: vda5050.Topic(r.Manufacturer, r.SerialNumber, "connection"), Payload: will},
+		c, err := Connect(brokerURL, "emu-robot-"+r.SerialNumber, connectionWill(r, time.Now()),
 			func(c pahomqtt.Client) {
 				if err := g.subscribeRobot(c, l); err != nil {
 					log.Warn("resubscribe failed", "robot", r.SerialNumber, "err", err)
@@ -73,6 +78,12 @@ func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommand
 	return g, nil
 }
 
+// connectionWill is the retained CONNECTION_BROKEN last will.
+func connectionWill(r RobotIdentity, at time.Time) *Will {
+	b, _ := json.Marshal(vda5050.Connection{Header: vda5050.NewHeader(0, at, r.Manufacturer, r.SerialNumber), ConnectionState: vda5050.ConnectionBroken})
+	return &Will{Topic: vda5050.Topic(r.Manufacturer, r.SerialNumber, "connection"), Payload: b}
+}
+
 // reannounce runs after a reconnect: the broker still holds the retained
 // CONNECTION_BROKEN will, so the robot says ONLINE again and republishes its
 // factsheet and state. It goes through the engine so that a fault-disconnected
@@ -84,16 +95,15 @@ func (g *RobotGateway) reannounce(l *robotLink) {
 }
 
 func (g *RobotGateway) subscribeRobot(c pahomqtt.Client, l *robotLink) error {
-	serial := l.id.SerialNumber
-	ctx := func() context.Context { return g.ctx.get() }
-	if err := subscribe(c, vda5050.Topic(l.id.Manufacturer, serial, "order"), func(p []byte) { g.onOrder(ctx(), serial, p) }); err != nil {
+	if err := subscribe(c, vda5050.Topic(l.id.Manufacturer, l.id.SerialNumber, "order"), l.inbox.handler()); err != nil {
 		return err
 	}
-	return subscribe(c, vda5050.Topic(l.id.Manufacturer, serial, "instantActions"), func(p []byte) { g.onInstantActions(ctx(), serial, p) })
+	return subscribe(c, vda5050.Topic(l.id.Manufacturer, l.id.SerialNumber, "instantActions"), l.inbox.handler())
 }
 
 // Start subscribes to every robot's order and instantActions topics (they are
-// subscribed again on every reconnect).
+// subscribed again on every reconnect) and starts one worker per robot that
+// handles that robot's messages in arrival order until ctx ends.
 func (g *RobotGateway) Start(ctx context.Context) error {
 	g.ctx.set(ctx)
 	for _, l := range g.links {
@@ -101,7 +111,27 @@ func (g *RobotGateway) Start(ctx context.Context) error {
 			return err
 		}
 	}
+	for _, l := range g.links {
+		g.startWorker(ctx, l)
+	}
 	return nil
+}
+
+func (g *RobotGateway) startWorker(ctx context.Context, l *robotLink) {
+	go l.inbox.drain(ctx, func(ctx context.Context, m inbound) { g.dispatch(ctx, l, m) })
+}
+
+// dispatch hands one received message to the order or instantActions handler.
+func (g *RobotGateway) dispatch(ctx context.Context, l *robotLink, m inbound) {
+	serial := l.id.SerialNumber
+	switch m.topic {
+	case vda5050.Topic(l.id.Manufacturer, serial, "order"):
+		g.onOrder(ctx, serial, m.payload)
+	case vda5050.Topic(l.id.Manufacturer, serial, "instantActions"):
+		g.onInstantActions(ctx, serial, m.payload)
+	default:
+		g.log.Warn("message on an unexpected topic", "robot", serial, "topic", m.topic)
+	}
 }
 
 func (g *RobotGateway) onOrder(ctx context.Context, serial string, payload []byte) {

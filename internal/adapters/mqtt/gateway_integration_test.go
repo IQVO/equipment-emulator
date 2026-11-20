@@ -80,9 +80,16 @@ func TestRobotAndAsrsOverMQTT(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := make(chan string, 64)
-	wcs.Subscribe("vda5050/v3/EMU/R1/state", 1, func(_ pahomqtt.Client, m pahomqtt.Message) { got <- "state:" + string(m.Payload()) })
-	wcs.Subscribe(telegram.UpTopic("ASRS1"), 1, func(_ pahomqtt.Client, m pahomqtt.Message) { got <- "up:" + string(m.Payload()) })
-	time.Sleep(300 * time.Millisecond)
+	for topic, prefix := range map[string]string{"vda5050/v3/EMU/R1/state": "state:", telegram.UpTopic("ASRS1"): "up:"} {
+		if err := subscribe(wcs, topic, func(_ pahomqtt.Client, m pahomqtt.Message) {
+			select { // never block paho's ordered delivery
+			case got <- prefix + string(m.Payload()):
+			default:
+			}
+		}); err != nil {
+			t.Fatal(err) // subscribe waits for the SUBACK: no sleep needed
+		}
+	}
 
 	order := `{"headerId":0,"timestamp":"2026-11-19T08:00:00.000Z","version":"3.0.0","manufacturer":"EMU","serialNumber":"R1","orderId":"o1","orderUpdateId":0,
 	 "nodes":[{"nodeId":"n1","sequenceId":0,"released":true,"nodePosition":{"x":0,"y":0,"mapId":"S1"},"actions":[]}],"edges":[]}`

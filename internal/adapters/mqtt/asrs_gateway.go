@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
 	pahomqtt "github.com/eclipse/paho.mqtt.golang"
@@ -29,16 +28,16 @@ type AsrsGateway struct {
 	retx   *telegram.Retransmitter
 	now    func() time.Time
 	log    *slog.Logger
-	mu     sync.Mutex // serialises handle
 	pub    func(topic string, payload []byte) error
-	ctx    handlerCtx // context for handlers, set by Start
+	inbox  *inbox
 }
 
+// NewAsrsGateway connects the PLC client of one AS/RS.
 func NewAsrsGateway(brokerURL, asrsID string, cmds AsrsCommands, now func() time.Time, log *slog.Logger) (*AsrsGateway, error) {
-	g := &AsrsGateway{asrsID: asrsID, cmds: cmds, dedup: telegram.NewDedup(1000),
-		retx: telegram.NewRetransmitter(2*time.Second, 3), now: now, log: log}
-	g.ctx.set(context.Background())
+	g := newAsrsGateway(asrsID, cmds, now, log)
 	g.pub = func(topic string, b []byte) error { return publish(g.client, topic, false, b) }
+	// A telegram delivered before Start waits in the inbox: the worker starts
+	// in Start, after g.client is assigned below, so nothing publishes on a nil client.
 	c, err := Connect(brokerURL, "emu-asrs-"+asrsID, nil, func(c pahomqtt.Client) {
 		if err := g.subscribeDown(c); err != nil {
 			log.Warn("resubscribe failed", "asrs", asrsID, "err", err)
@@ -51,8 +50,14 @@ func NewAsrsGateway(brokerURL, asrsID string, cmds AsrsCommands, now func() time
 	return g, nil
 }
 
+func newAsrsGateway(asrsID string, cmds AsrsCommands, now func() time.Time, log *slog.Logger) *AsrsGateway {
+	return &AsrsGateway{asrsID: asrsID, cmds: cmds, dedup: telegram.NewDedup(1000),
+		retx: telegram.NewRetransmitter(2*time.Second, 3), now: now, log: log,
+		inbox: newInbox(InboxSize, "asrs "+asrsID, log)}
+}
+
 func (g *AsrsGateway) subscribeDown(c pahomqtt.Client) error {
-	return subscribe(c, telegram.DownTopic(g.asrsID), func(p []byte) { g.handle(g.ctx.get(), p) })
+	return subscribe(c, telegram.DownTopic(g.asrsID), g.inbox.handler())
 }
 
 func pos(p *telegram.Position) asrs.Position {
@@ -76,13 +81,12 @@ func (g *AsrsGateway) send(t telegram.Telegram, track bool) {
 	}
 }
 
-// handle serialises the processing of down telegrams: the client delivers
-// messages concurrently (OrderMatters is off), but a STORE and a later CANCEL
-// of one job must not be reordered, and Lookup then Remember must be atomic.
-func (g *AsrsGateway) handle(ctx context.Context, payload []byte) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	reply, afterAck := g.process(ctx, payload)
+// handle processes one down telegram. Only the gateway's worker calls it, one
+// telegram at a time in arrival order, so no lock is needed: a STORE and a
+// later CANCEL of one job are never reordered, and Lookup then Remember of the
+// dedup cache cannot interleave.
+func (g *AsrsGateway) handle(ctx context.Context, m inbound) {
+	reply, afterAck := g.process(ctx, m.payload)
 	if reply != nil {
 		g.send(*reply, false)
 	}
@@ -93,7 +97,7 @@ func (g *AsrsGateway) handle(ctx context.Context, payload []byte) {
 
 // process decodes one down telegram, applies it through the commands and
 // returns the telegram to send back (nil for none) plus work to run after
-// that reply went out. The caller must hold g.mu.
+// that reply went out.
 func (g *AsrsGateway) process(ctx context.Context, payload []byte) (reply *telegram.Telegram, afterAck func()) {
 	t, err := telegram.Decode(payload)
 	if err != nil {
@@ -139,11 +143,18 @@ func (g *AsrsGateway) process(ctx context.Context, payload []byte) (reply *teleg
 	return &ack, afterAck
 }
 
-// Start subscribes to the down topic (and again on every reconnect).
+// Start subscribes to the down topic (it is subscribed again on every
+// reconnect) and starts the worker that handles down telegrams in arrival
+// order until ctx ends.
 func (g *AsrsGateway) Start(ctx context.Context) error {
-	g.ctx.set(ctx)
-	return g.subscribeDown(g.client)
+	if err := g.subscribeDown(g.client); err != nil {
+		return err
+	}
+	g.startWorker(ctx)
+	return nil
 }
+
+func (g *AsrsGateway) startWorker(ctx context.Context) { go g.inbox.drain(ctx, g.handle) }
 
 // Publish turns PLC events into up telegrams that wait for an ACK.
 func (g *AsrsGateway) Publish(_ context.Context, evs []asrs.Event, at time.Time) error {
