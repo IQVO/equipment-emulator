@@ -26,4 +26,14 @@ grep -q 'memory: 64Mi' <<<"$deployment" || fail "memory request must be 64Mi"
 renamed="$(render --show-only templates/deployment.yaml --set mqtt.url=tcp://x:1 --set config.simSpeed=5)"
 grep -A1 'name: MQTT_URL$' <<<"$renamed" | grep -q 'tcp://x:1' || fail "mqtt.url does not reach MQTT_URL"
 grep -A1 'name: SIM_SPEED$' <<<"$renamed" | grep -q '"5"' || fail "config.simSpeed does not reach SIM_SPEED"
+
+# ci/all-components-values.yaml sets every optional value: each must reach the render.
+all="$(render -f "$chart_dir/ci/all-components-values.yaml")"
+for want in 'name: ghcr-pull' 'serviceAccountName: equipment-emulator-ci' 'example.invalid/role: emulator' \
+  'example.invalid/scrape: "false"' 'tier: wcs-test' 'name: EXTRA_FLAG' 'kubernetes.io/os: linux' \
+  'key: dedicated' 'preferredDuringSchedulingIgnoredDuringExecution' 'tcp://mosquitto.example.invalid:1883' \
+  'image: "\?ghcr.io/iqvo/equipment-emulator:ci'; do
+  grep -q -- "$want" <<<"$all" || fail "all-components-values: '$want' does not reach the render"
+done
+[[ "$(grep -c '^kind: Deployment' <<<"$all")" == 1 ]] || fail "all-components-values: expected exactly one Deployment"
 echo "render_test: ok"
