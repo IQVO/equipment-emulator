@@ -35,12 +35,13 @@ RUN apk upgrade --no-cache && \
     apk add --no-cache ca-certificates tzdata && \
     addgroup -g 1000 -S app && adduser -u 1000 -S app -G app
 WORKDIR /app
-# Embed the SQL migrations in the binary (go:embed) so no migrations directory
-# is copied. The service writes nothing to disk, so the chart mounts the root
-# filesystem read-only. Logs go to stdout.
+# The emulator writes nothing to disk, so the chart mounts the root filesystem
+# read-only. Logs go to stdout. The example world is the default; the chart
+# mounts its own world.yaml over /etc/emulator.
 COPY --from=build --chown=app:app /out/ ./
+COPY --from=build --chown=app:app /src/config/world.example.yaml /etc/emulator/world.yaml
+ENV WORLD_FILE=/etc/emulator/world.yaml
 USER 1000
 EXPOSE 8080
-# cmd/api is the service's main binary (HTTP on :8080). Additional cmd/*
-# binaries are run by the chart with `command: ["/app/<dirname>"]`.
-ENTRYPOINT ["./api"]
+# cmd/emulator is the only binary (admin API on :8080).
+ENTRYPOINT ["./emulator"]
