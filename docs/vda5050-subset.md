@@ -41,8 +41,11 @@ in `actionStates` and `instantActionStates` (`WAITING`, `RUNNING`, `FINISHED`,
 - An order needs an `orderId`, at least one node, one edge between each pair of
   nodes, a released first node and no released node after the horizon; node
   action types must be supported. Otherwise the error is `VALIDATION_FAILURE`.
-- A rejection is reported only as an error in the next `state`; there is no
-  reply topic. `cancelOrder` keeps `orderId` and `lastNodeId`; without an
+- There is no reply topic. A rejection by these rules (`OUTDATED_ORDER_UPDATE`,
+  `SAME_ORDER_UPDATE_ID`, `INVALID_ORDER`, `VALIDATION_FAILURE`) is reported as
+  a `WARNING` error in the next `state`. An unsupported order (any edge action,
+  or a node without `nodePosition`) is dropped and logged by the emulator and
+  is not reported in `state`: fleet control gets no feedback. `cancelOrder` keeps `orderId` and `lastNodeId`; without an
   active order it fails with `NO_ORDER_TO_CANCEL`. An unsupported instant
   action fails with `INVALID_INSTANT_ACTION`.
 
@@ -58,7 +61,7 @@ in `actionStates` and `instantActionStates` (`WAITING`, `RUNNING`, `FINISHED`,
 
 ## Not implemented
 
-- Edge actions (an order with one is ignored and logged)
+- Edge actions: an order with one is not supported; the whole order is dropped, logged, not reported in state
 - Trajectories, corridors and zones (`zoneSet`)
 - `visualization` topic and `responses`
 - Maps download

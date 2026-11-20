@@ -47,8 +47,12 @@ channels:
         of the robot. An update (same orderId) needs a greater orderUpdateId
         (OUTDATED_ORDER_UPDATE / SAME_ORDER_UPDATE_ID otherwise) and must start
         at the last released node. nodePosition is required on every node and
-        edge actions are not supported. A rejection is not answered on a reply
-        topic; it appears as a WARNING in `errors` of the next state message.
+        edge actions are not supported. There is no reply topic. A rejection by
+        the robot's order rules (OUTDATED_ORDER_UPDATE, SAME_ORDER_UPDATE_ID,
+        INVALID_ORDER, VALIDATION_FAILURE) appears as a WARNING in `errors` of
+        the next state message. An unsupported order (any edge action, or a
+        node without nodePosition) is dropped and logged by the emulator and
+        is NOT reported in state: fleet control gets no feedback.
       tags: [{name: vda5050}]
       message: {$ref: "#/components/messages/Order"}
   vda5050/v3/{manufacturer}/{serialNumber}/instantActions:
@@ -474,7 +478,7 @@ components:
         maxSpeed: {type: number}
         actions:
           type: array
-          description: Must be empty; edge actions are not supported.
+          description: Must be empty. An order with edge actions is dropped and logged, not reported in state.
           maxItems: 0
           items: {$ref: "#/components/schemas/Action"}
     Order:
