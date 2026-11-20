@@ -105,13 +105,15 @@ rules: `docs/telegram-protocol.md`.
 ## Admin REST API (control operations)
 
 Specified in `apis/openapi.yaml`; unauthenticated (fleet rule); every error is
-`application/problem+json`. Route-to-engine mapping: `.claude/rules/rest-api.md`.
+`application/problem+json` with a stable `code`. Every POST takes an optional `Idempotency-Key`
+(in-memory store, 24 h, lost on restart; ADR 0006). Route-to-engine mapping:
+`.claude/rules/rest-api.md`.
 
 | Method and path | Operation | Purpose |
 | --- | --- | --- |
 | `GET /healthz` | `healthz` | Liveness |
 | `GET /readyz` | `readyz` | 503 until the MQTT broker is connected |
-| `GET /robots` | `listRobots` | Every robot's order, last node, pose, battery, load and active error types |
+| `GET /robots` | `listRobots` | One keyset page (`limit`, `cursor`; `{items, nextCursor}`) of every robot's order, last node, pose, battery, load and active error types |
 | `GET /asrs/{asrsId}` | `getAsrs` | Rack slots, port contents and unit states of one AS/RS |
 | `POST /faults` | `injectFault` | Set or clear a fault: `ROBOT_BLOCKED`, `ROBOT_BATTERY` (set state of charge), `ROBOT_DISCONNECT`, `ASRS_UNIT` (hold an aisle unit), `ASRS_NO_READ` (output port) |
 | `POST /asrs/{asrsId}/seeds` | `seedContainer` | Put a container into a rack position (initial stock) |

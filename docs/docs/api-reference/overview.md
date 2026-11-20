@@ -24,7 +24,7 @@ interface ([ADR 0001](/docs/adr/0001-emulator-role-and-boundaries)).
 | --- | --- | --- | --- |
 | Health | `GET /healthz` | `healthz` | `200` |
 | Health | `GET /readyz` | `readyz` | `200`, `503` until the broker is connected |
-| Robots | `GET /robots` | `listRobots` | `200` every robot's order, last node, pose, battery, load and active error types |
+| Robots | `GET /robots` | `listRobots` | `200` one `{items, nextCursor}` page of robots (order, last node, pose, battery, load, active error types) |
 | Asrs | `GET /asrs/{asrsId}` | `getAsrs` | `200` rack slots, port contents, unit states |
 | Faults | `POST /faults` | `injectFault` | `204` |
 | Asrs | `POST /asrs/{asrsId}/seeds` | `seedContainer` | `204` |
@@ -32,8 +32,18 @@ interface ([ADR 0001](/docs/adr/0001-emulator-role-and-boundaries)).
 
 ## Conventions
 
-- Errors are RFC 7807 `application/problem+json`: `400` an undecodable or incomplete
-  body, `404` an unknown robot or AS/RS, `409` a device refusal (the `detail` is the
-  bare reason code, e.g. `WRONG_PORT_KIND`, `UNKNOWN_PORT`), `422` any other refusal.
+- Errors are RFC 7807 `application/problem+json` with a stable `code`: `400` an undecodable or
+  incomplete body, a malformed key or a bad paging parameter, `404` an unknown robot or AS/RS,
+  `409` a device refusal (the `detail` is the bare reason code, e.g. `WRONG_PORT_KIND`,
+  `UNKNOWN_PORT`) or a reused key, `422` an unknown fault kind or a result that could not be
+  published.
 - Fault injection is idempotent by construction: `active` switches a fault on or off.
+- Every POST accepts an **optional** `Idempotency-Key`
+  ([ADR 0006](/docs/adr/0006-rest-guideline-on-the-admin-api)). With it, a retry is answered
+  from the store (`Idempotency-Replayed: true`) when the first answer was a 204 or a final
+  refusal; a retryable refusal (`port-occupied`, `position-occupied`, `asrs-rejected`,
+  `command-not-applied`) releases the key. Keys are kept 24 hours in process memory and are
+  lost on a restart.
+- `GET /robots` pages: `limit` (1-500, default 100) and the opaque `cursor` from the
+  previous page's `nextCursor`; any other query parameter is `400 unknown-query-parameter`.
 - The admin API never commands a device; orders and jobs arrive only over MQTT.

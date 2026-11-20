@@ -103,8 +103,11 @@ expiries, robots by state, and the simulated-time ratio. Details:
 
 The admin API (`/healthz`, `/readyz`, `/robots`, `/asrs/{asrsId}`, `/faults`,
 seeding routes) is specified in [apis/openapi.yaml](apis/openapi.yaml); this
-README does not repeat it. Errors are `application/problem+json`; fault
-injection is idempotent (`active` switches a fault on or off). It has no
+README does not repeat it. Errors are `application/problem+json` with a stable
+`code`; fault injection is idempotent (`active` switches a fault on or off). Every
+POST takes an optional `Idempotency-Key` (replayed for 24 hours from process memory,
+lost on restart), and `GET /robots` answers a keyset page `{items, nextCursor}`
+([ADR 0006](docs/adr/0006-rest-guideline-on-the-admin-api.md)). It has no
 authentication layer ([ADR 0004](docs/adr/0004-simulated-time-fault-injection-and-admin-api.md)).
 
 The MQTT protocols are specified in [apis/asyncapi.yaml](apis/asyncapi.yaml):

@@ -38,7 +38,7 @@ rebuilt from the world file; rack stock must be seeded again.
 ## Clear faults
 
 Every fault is switched off with the same `POST /faults` body and `"active": false`.
-`GET /robots` lists each robot's active error types; `GET /asrs/{asrsId}` shows unit
+`GET /robots` lists each robot's active error types (`.items[]`, follow `nextCursor` past 100 robots); `GET /asrs/{asrsId}` shows unit
 states (`HELD` while an `ASRS_UNIT` fault is on).
 
 ## Change the world on the cluster
