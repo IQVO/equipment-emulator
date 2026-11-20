@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -67,14 +68,20 @@ func Encode(t Telegram) ([]byte, error) {
 // Decode unmarshals and validates a telegram.
 func Decode(b []byte) (Telegram, error) {
 	var w wire
+	// Keep the partially decoded telegram on every error but a JSON syntax
+	// error, so the gateway can NACK it by ID.
 	if err := json.Unmarshal(b, &w); err != nil {
-		return Telegram{}, fmt.Errorf("MALFORMED: %w", err)
-	}
-	ts, err := time.Parse(time.RFC3339Nano, w.TS)
-	if err != nil {
-		return Telegram{}, fmt.Errorf("MALFORMED: timestamp: %w", err)
+		var syntax *json.SyntaxError
+		if errors.As(err, &syntax) {
+			return Telegram{}, fmt.Errorf("MALFORMED: %w", err)
+		}
+		return w.Telegram, fmt.Errorf("MALFORMED: %w", err)
 	}
 	t := w.Telegram
+	ts, err := time.Parse(time.RFC3339Nano, w.TS)
+	if err != nil {
+		return t, fmt.Errorf("MALFORMED: timestamp: %w", err)
+	}
 	t.Timestamp = ts
 	return t, validate(t)
 }
@@ -119,7 +126,15 @@ func NewAck(of Telegram, err error, id string, at time.Time) Telegram {
 	accepted := err == nil
 	a := Telegram{ID: id, Type: Ack, Timestamp: at, AckOf: of.ID, Accepted: &accepted}
 	if err != nil {
-		a.Reason = err.Error()
+		a.Reason = reasonCode(err.Error())
 	}
 	return a
+}
+
+// reasonCode reduces an error message to its bare code: the text before the
+// first newline or ':', trimmed. Details are logged by the sender, not sent.
+func reasonCode(msg string) string {
+	msg, _, _ = strings.Cut(msg, "\n")
+	msg, _, _ = strings.Cut(msg, ":")
+	return strings.TrimSpace(msg)
 }

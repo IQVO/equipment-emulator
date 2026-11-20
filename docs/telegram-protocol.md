@@ -50,6 +50,9 @@ A position is `{"aisle": 1, "level": 2, "slot": 10, "depth": 1}`; `depth` is 1
 3. A receiver that sees a `telegramId` again does not process it again; it
    resends the ACK it sent the first time.
 
+`reason` is always one bare code from the lists on this page; details are
+logged by the sender, not sent.
+
 ## Job outcomes
 
 An accepted job ends in exactly one JOB_DONE or JOB_FAILED. JOB_FAILED reasons
