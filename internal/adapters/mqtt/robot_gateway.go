@@ -45,21 +45,25 @@ func (l *robotLink) header(topic string, at time.Time) vda5050.Header {
 }
 
 // RobotGateway is one MQTT client per robot, as each real robot would have.
+// Every timestamp it publishes is simulated time (now).
 type RobotGateway struct {
 	links map[string]*robotLink
 	cmds  RobotCommands
+	now   func() time.Time // simulated time
 	log   *slog.Logger
 	ctx   handlerCtx // context for the reconnect handler, set by Start
 }
 
-// NewRobotGateway connects one client per robot.
-func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommands, log *slog.Logger) (*RobotGateway, error) {
-	g := &RobotGateway{links: map[string]*robotLink{}, cmds: cmds, log: log}
+// NewRobotGateway connects one client per robot. now is the simulated clock;
+// the static last will is built here, so it carries the process-start
+// (simulation start) timestamp.
+func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommands, now func() time.Time, log *slog.Logger) (*RobotGateway, error) {
+	g := &RobotGateway{links: map[string]*robotLink{}, cmds: cmds, now: now, log: log}
 	g.ctx.set(context.Background())
 	for _, r := range robots {
 		l := newRobotLink(r, log)
 		var connects atomic.Int32
-		c, err := Connect(brokerURL, "emu-robot-"+r.SerialNumber, connectionWill(r, time.Now()),
+		c, err := Connect(brokerURL, "emu-robot-"+r.SerialNumber, connectionWill(r, now()),
 			func(c pahomqtt.Client) {
 				if err := g.subscribeRobot(c, l); err != nil {
 					log.Warn("resubscribe failed", "robot", r.SerialNumber, "err", err)
@@ -78,7 +82,8 @@ func NewRobotGateway(brokerURL string, robots []RobotIdentity, cmds RobotCommand
 	return g, nil
 }
 
-// connectionWill is the retained CONNECTION_BROKEN last will.
+// connectionWill is the retained CONNECTION_BROKEN last will. The broker
+// stores it at connect time, so its timestamp is fixed: at, the process start.
 func connectionWill(r RobotIdentity, at time.Time) *Will {
 	b, _ := json.Marshal(vda5050.Connection{Header: vda5050.NewHeader(0, at, r.Manufacturer, r.SerialNumber), ConnectionState: vda5050.ConnectionBroken})
 	return &Will{Topic: vda5050.Topic(r.Manufacturer, r.SerialNumber, "connection"), Payload: b}
@@ -205,7 +210,7 @@ func (g *RobotGateway) Connected() bool {
 // Close publishes OFFLINE for every robot (a coordinated shutdown) and disconnects.
 func (g *RobotGateway) Close() {
 	for serial, l := range g.links {
-		_ = g.PublishConnection(context.Background(), l.id.Manufacturer, serial, vda5050.ConnectionOffline, time.Now())
+		_ = g.PublishConnection(context.Background(), l.id.Manufacturer, serial, vda5050.ConnectionOffline, g.now())
 		l.client.Disconnect(250)
 	}
 }

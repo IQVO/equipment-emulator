@@ -23,7 +23,7 @@ One flat JSON object. Fields not used by a type are omitted.
 | --- | --- | --- |
 | `telegramId` | string (UUID) | all |
 | `type` | string | all |
-| `timestamp` | string, RFC 3339 UTC with milliseconds | all |
+| `timestamp` | string, RFC 3339 UTC with milliseconds; simulated time on up telegrams (see Time) | all |
 | `jobId` | string | STORE, RETRIEVE, MOVE, CANCEL, JOB_DONE, JOB_FAILED |
 | `containerId` | string | STORE, RETRIEVE, MOVE, PORT_ARRIVAL (absent = no-read) |
 | `portId` | string | STORE (input port), RETRIEVE (output port), PORT_ARRIVAL |
@@ -37,6 +37,15 @@ One flat JSON object. Fields not used by a type are omitted.
 
 A position is `{"aisle": 1, "level": 2, "slot": 10, "depth": 1}`; `depth` is 1
 (front) or 2 (back, double-deep racks only).
+
+## Time
+
+Timestamps are simulated time; at `SIM_SPEED` 1 they track wall time.
+Simulated time starts at the process start and advances with the simulation,
+so at `SIM_SPEED` 10 a JOB_DONE is stamped with the simulated instant the job
+finished. Every up telegram the PLC publishes, ACKs included, carries it. The
+2 s retransmit timeout below is not simulated: it is a property of the wire
+and runs on real time at any `SIM_SPEED`.
 
 ## Handshake
 

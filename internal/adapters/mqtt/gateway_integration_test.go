@@ -56,11 +56,11 @@ func TestRobotAndAsrsOverMQTT(t *testing.T) {
 	log := slog.Default()
 	router := AsrsRouter{}
 	var eng *engine.Engine
-	rg, err := NewRobotGateway(url, []RobotIdentity{{"EMU", "R1"}}, cmdsProxy{&eng}, log)
+	rg, err := NewRobotGateway(url, []RobotIdentity{{"EMU", "R1"}}, cmdsProxy{&eng}, clock.Now, log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ag, err := NewAsrsGateway(url, "ASRS1", asrsProxy{&eng}, time.Now, log)
+	ag, err := NewAsrsGateway(url, "ASRS1", asrsProxy{&eng}, clock.Now, log)
 	if err != nil {
 		t.Fatal(err)
 	}

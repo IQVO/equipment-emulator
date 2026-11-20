@@ -104,7 +104,8 @@ channels:
         ONLINE is published after connecting and again after every reconnect.
         OFFLINE is published on a coordinated shutdown. CONNECTION_BROKEN is the
         retained MQTT last will the broker publishes when the emulator drops
-        without disconnecting.
+        without disconnecting; it is fixed at connect time, so its timestamp is
+        the process start (every other timestamp is simulated time).
       tags: [{name: vda5050}]
       message: {$ref: "#/components/messages/Connection"}
   vda5050/v3/{manufacturer}/{serialNumber}/factsheet:
@@ -430,7 +431,7 @@ components:
       required: [headerId, timestamp, version, manufacturer, serialNumber]
       properties:
         headerId: {type: integer, minimum: 0, description: "Counter per topic, starts at 0 per process start."}
-        timestamp: {type: string, description: "UTC, millisecond precision.", example: "2026-11-19T10:15:30.000Z"}
+        timestamp: {type: string, description: "UTC, millisecond precision. Timestamps are simulated time; at SIM_SPEED 1 they track wall time. The static CONNECTION_BROKEN last will carries the process-start timestamp.", example: "2026-11-19T10:15:30.000Z"}
         version: {type: string, example: "3.0.0"}
         manufacturer: {type: string, example: acme}
         serialNumber: {type: string, example: amr-01}
@@ -628,7 +629,7 @@ components:
       required: [telegramId, type, timestamp]
       properties:
         telegramId: {type: string, format: uuid}
-        timestamp: {type: string, description: "RFC 3339 UTC with milliseconds."}
+        timestamp: {type: string, description: "RFC 3339 UTC with milliseconds. On telegrams the emulator publishes, timestamps are simulated time; at SIM_SPEED 1 they track wall time. The retransmit timeout runs on real time."}
     Store:
       allOf:
         - $ref: "#/components/schemas/TelegramBase"

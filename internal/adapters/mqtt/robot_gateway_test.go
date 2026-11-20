@@ -2,6 +2,7 @@ package mqtt
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -79,7 +80,7 @@ const cancelOrderJSON = `{"headerId":9,"timestamp":"2026-11-19T08:00:00.000Z","v
 
 func TestRobotMessagesThroughTheCallbackAreHandledInArrivalOrder(t *testing.T) {
 	f := &fakeRobots{delay: 5 * time.Millisecond}
-	g := &RobotGateway{links: map[string]*robotLink{}, cmds: f, log: quietLog()}
+	g := &RobotGateway{links: map[string]*robotLink{}, cmds: f, now: time.Now, log: quietLog()}
 	l := newRobotLink(RobotIdentity{"EMU", "R1"}, quietLog())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -97,5 +98,16 @@ func TestRobotMessagesThroughTheCallbackAreHandledInArrivalOrder(t *testing.T) {
 	}
 	if got := f.snapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("handled %v, want %v", got, want)
+	}
+}
+
+func TestConnectionWillCarriesTheGivenTimestamp(t *testing.T) {
+	w := connectionWill(RobotIdentity{"EMU", "R1"}, simStart)
+	var c vda5050.Connection
+	if err := json.Unmarshal(w.Payload, &c); err != nil {
+		t.Fatal(err)
+	}
+	if w.Topic != "vda5050/v3/EMU/R1/connection" || c.ConnectionState != vda5050.ConnectionBroken || c.Timestamp != "2030-01-02T03:04:05.000Z" {
+		t.Fatalf("will = %s %s", w.Topic, w.Payload)
 	}
 }

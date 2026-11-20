@@ -248,3 +248,21 @@ func TestUpTelegramIsTrackedBeforeItIsPublished(t *testing.T) {
 		t.Fatalf("an acknowledged telegram is retransmitted: %+v", resend)
 	}
 }
+
+func TestTimestampsAreSimulatedButTheRetransmitTimerIsReal(t *testing.T) {
+	g, out := testGateway(&fakeAsrs{})
+	ack, _ := g.process(context.Background(), []byte(storeJSON))
+	if !ack.Timestamp.Equal(simStart) {
+		t.Fatalf("ACK timestamp %s, want the simulated %s", ack.Timestamp, simStart)
+	}
+	if err := g.Publish(context.Background(), []asrs.Event{{Kind: asrs.EventJobDone, JobID: "j1"}}, simStart); err != nil {
+		t.Fatal(err)
+	}
+	if sent := out.snapshot(); !sent[0].Timestamp.Equal(simStart) {
+		t.Fatalf("JOB_DONE timestamp %s", sent[0].Timestamp)
+	}
+	// simulated time is years ahead of wall time: a sim-clocked timer would never be due now
+	if resend, _ := g.retx.Due(time.Now().Add(3 * time.Second)); len(resend) != 1 {
+		t.Fatalf("the retransmit timer must run on wall time: %d due", len(resend))
+	}
+}

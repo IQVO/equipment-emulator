@@ -6,6 +6,12 @@ here. The wire contract is `apis/asyncapi.yaml`. Topics are
 carries the header (`headerId` counting per topic, `timestamp`, `version`,
 `manufacturer`, `serialNumber`). Required arrays serialise as `[]`.
 
+Timestamps are simulated time; at `SIM_SPEED` 1 they track wall time.
+Simulated time starts at the process start. Every `state`, `connection` and
+`factsheet` message is stamped with it, except the static `CONNECTION_BROKEN`
+last will: the broker stores it when the robot's client connects, so it
+carries the process-start timestamp.
+
 ## Implemented
 
 | Topic | Direction | Notes |

@@ -20,19 +20,26 @@ type AsrsCommands interface {
 }
 
 // AsrsGateway is the PLC side of one AS/RS.
+//
+// Two clocks, kept apart on purpose: now is simulated time and stamps every
+// telegram it publishes (ACKs included), like every other emulator timestamp;
+// wall is real time and drives only the retransmit timer, because the 2 s
+// handshake timeout is a property of the wire, not of the simulation.
 type AsrsGateway struct {
 	asrsID string
 	client pahomqtt.Client
 	cmds   AsrsCommands
 	dedup  *telegram.Dedup
 	retx   *telegram.Retransmitter
-	now    func() time.Time
+	now    func() time.Time // simulated time: telegram timestamps
+	wall   func() time.Time // real time: the retransmit timer
 	log    *slog.Logger
 	pub    func(topic string, payload []byte) error
 	inbox  *inbox
 }
 
-// NewAsrsGateway connects the PLC client of one AS/RS.
+// NewAsrsGateway connects the PLC client of one AS/RS. now is the simulated
+// clock that stamps the up telegrams.
 func NewAsrsGateway(brokerURL, asrsID string, cmds AsrsCommands, now func() time.Time, log *slog.Logger) (*AsrsGateway, error) {
 	g := newAsrsGateway(asrsID, cmds, now, log)
 	g.pub = func(topic string, b []byte) error { return publish(g.client, topic, false, b) }
@@ -52,7 +59,7 @@ func NewAsrsGateway(brokerURL, asrsID string, cmds AsrsCommands, now func() time
 
 func newAsrsGateway(asrsID string, cmds AsrsCommands, now func() time.Time, log *slog.Logger) *AsrsGateway {
 	return &AsrsGateway{asrsID: asrsID, cmds: cmds, dedup: telegram.NewDedup(1000),
-		retx: telegram.NewRetransmitter(2*time.Second, 3), now: now, log: log,
+		retx: telegram.NewRetransmitter(2*time.Second, 3), now: now, wall: time.Now, log: log,
 		inbox: newInbox(InboxSize, "asrs "+asrsID, log)}
 }
 
@@ -77,7 +84,7 @@ func (g *AsrsGateway) send(t telegram.Telegram, track bool) {
 		return
 	}
 	if track {
-		g.retx.Track(t, g.now())
+		g.retx.Track(t, g.wall())
 	}
 	if err := g.pub(telegram.UpTopic(g.asrsID), b); err != nil {
 		g.log.Warn("publish failed; the retransmitter will retry", "telegramId", t.ID, "err", err)
@@ -187,7 +194,7 @@ func (g *AsrsGateway) RunRetransmit(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			resend, expired := g.retx.Due(g.now())
+			resend, expired := g.retx.Due(g.wall())
 			for _, t := range resend {
 				g.send(t, false)
 			}

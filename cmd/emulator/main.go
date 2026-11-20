@@ -35,6 +35,8 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Simulated time starts at the process start; every published timestamp is
+	// simulated time (at SIM_SPEED 1 it tracks wall time).
 	clock, robots, systems, nodes, err := cfg.World.Build(time.Now())
 	if err != nil {
 		return err
@@ -44,14 +46,14 @@ func run(log *slog.Logger) error {
 	for _, r := range cfg.World.Robots {
 		ids = append(ids, mqtt.RobotIdentity{Manufacturer: r.Manufacturer, SerialNumber: r.SerialNumber})
 	}
-	rg, err := mqtt.NewRobotGateway(cfg.MQTTURL, ids, px, log)
+	rg, err := mqtt.NewRobotGateway(cfg.MQTTURL, ids, px, clock.Now, log)
 	if err != nil {
 		return err
 	}
 	defer rg.Close()
 	router := mqtt.AsrsRouter{}
 	for _, s := range systems {
-		g, err := mqtt.NewAsrsGateway(cfg.MQTTURL, s.ID(), px, time.Now, log)
+		g, err := mqtt.NewAsrsGateway(cfg.MQTTURL, s.ID(), px, clock.Now, log)
 		if err != nil {
 			return err
 		}
