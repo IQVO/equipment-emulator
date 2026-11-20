@@ -1,0 +1,721 @@
+asyncapi: 2.6.0
+info:
+  title: Equipment Emulator MQTT Protocols
+  version: 1.0.0
+  description: |
+    The two MQTT protocols the equipment emulator speaks, as the simulated device.
+    The emulator stands in for ISA-95 levels 1 and 0 of the WCS tier: AMR robots
+    speaking the VDA 5050 v3.0.0 subset in docs/vda5050-subset.md, and an AS/RS PLC
+    speaking AS/RS telegram protocol v1 in docs/telegram-protocol.md.
+
+    Operations are written from the emulator's point of view: `publish` means the
+    peer (fleet control, the WCS) publishes and the emulator receives; `subscribe`
+    means the emulator publishes. All channels use QoS 1 and JSON (UTF-8).
+  contact:
+    name: equipment-emulator maintainers
+    url: https://github.com/IQVO/equipment-emulator
+    email: equipment-emulator@example.com
+  license:
+    name: UNLICENSED
+tags:
+  - name: vda5050
+    description: VDA 5050 v3 robot protocol.
+  - name: asrs
+    description: AS/RS telegram protocol v1.
+defaultContentType: application/json
+servers:
+  broker:
+    url: mosquitto.warehouse-systems.svc.cluster.local:1883
+    protocol: mqtt
+    protocolVersion: "3.1.1"
+    description: The MQTT broker both protocols run over. No authentication layer.
+
+channels:
+  vda5050/v3/{manufacturer}/{serialNumber}/order:
+    description: Orders from fleet control to one robot. The emulator subscribes after connecting and again after every reconnect.
+    parameters:
+      manufacturer: {$ref: "#/components/parameters/manufacturer"}
+      serialNumber: {$ref: "#/components/parameters/serialNumber"}
+    bindings:
+      mqtt: {qos: 1, retain: false}
+    publish:
+      operationId: receiveOrder
+      summary: Fleet control sends an order or an order update
+      description: |
+        Acceptance rules: a new order is accepted only when the previous one is
+        finished; its first node must be the robot's lastNodeId or within 0.5 m
+        of the robot. An update (same orderId) needs a greater orderUpdateId
+        (OUTDATED_ORDER_UPDATE / SAME_ORDER_UPDATE_ID otherwise) and must start
+        at the last released node. nodePosition is required on every node and
+        edge actions are not supported. A rejection is not answered on a reply
+        topic; it appears as a WARNING in `errors` of the next state message.
+      tags: [{name: vda5050}]
+      message: {$ref: "#/components/messages/Order"}
+  vda5050/v3/{manufacturer}/{serialNumber}/instantActions:
+    description: Instant actions from fleet control to one robot.
+    parameters:
+      manufacturer: {$ref: "#/components/parameters/manufacturer"}
+      serialNumber: {$ref: "#/components/parameters/serialNumber"}
+    bindings:
+      mqtt: {qos: 1, retain: false}
+    publish:
+      operationId: receiveInstantActions
+      summary: Fleet control sends instant actions
+      description: |
+        Supported actionType values: cancelOrder, startCharging, stopCharging,
+        stateRequest, factsheetRequest. Each is reported in instantActionStates
+        of the state message; an unsupported type or cancelOrder without an
+        active order fails with INVALID_INSTANT_ACTION or NO_ORDER_TO_CANCEL.
+      tags: [{name: vda5050}]
+      message: {$ref: "#/components/messages/InstantActions"}
+  vda5050/v3/{manufacturer}/{serialNumber}/state:
+    description: The robot's state, published on every simulation update.
+    parameters:
+      manufacturer: {$ref: "#/components/parameters/manufacturer"}
+      serialNumber: {$ref: "#/components/parameters/serialNumber"}
+    bindings:
+      mqtt: {qos: 1, retain: false}
+    subscribe:
+      operationId: publishState
+      summary: The emulator publishes the robot state
+      description: |
+        Required arrays serialise as [] when empty. paused is always false,
+        operatingMode is always AUTOMATIC. errorType values include the VDA 5050
+        ones VALIDATION_FAILURE, INVALID_ORDER, OUTDATED_ORDER_UPDATE,
+        SAME_ORDER_UPDATE_ID, NO_ORDER_TO_CANCEL, INVALID_INSTANT_ACTION and the
+        emulator extensions LOAD_NOT_AVAILABLE, ROBOT_BLOCKED, BATTERY_EMPTY.
+      tags: [{name: vda5050}]
+      message: {$ref: "#/components/messages/State"}
+  vda5050/v3/{manufacturer}/{serialNumber}/connection:
+    description: The robot's connection state. Retained.
+    parameters:
+      manufacturer: {$ref: "#/components/parameters/manufacturer"}
+      serialNumber: {$ref: "#/components/parameters/serialNumber"}
+    bindings:
+      mqtt: {qos: 1, retain: true}
+    subscribe:
+      operationId: publishConnection
+      summary: The emulator publishes ONLINE, OFFLINE or CONNECTION_BROKEN
+      description: |
+        ONLINE is published after connecting and again after every reconnect.
+        OFFLINE is published on a coordinated shutdown. CONNECTION_BROKEN is the
+        retained MQTT last will the broker publishes when the emulator drops
+        without disconnecting.
+      tags: [{name: vda5050}]
+      message: {$ref: "#/components/messages/Connection"}
+  vda5050/v3/{manufacturer}/{serialNumber}/factsheet:
+    description: The robot's factsheet. Retained.
+    parameters:
+      manufacturer: {$ref: "#/components/parameters/manufacturer"}
+      serialNumber: {$ref: "#/components/parameters/serialNumber"}
+    bindings:
+      mqtt: {qos: 1, retain: true}
+    subscribe:
+      operationId: publishFactsheet
+      summary: The emulator publishes the factsheet subset
+      description: Published at startup, after a reconnect and on a factsheetRequest. Only typeSpecification and physicalParameters are included.
+      tags: [{name: vda5050}]
+      message: {$ref: "#/components/messages/Factsheet"}
+  asrs/v1/{asrsId}/down:
+    description: WCS to PLC telegrams. Not retained.
+    parameters:
+      asrsId: {$ref: "#/components/parameters/asrsId"}
+    bindings:
+      mqtt: {qos: 1, retain: false}
+    publish:
+      operationId: receiveDownTelegram
+      summary: The WCS sends a command telegram, or an ACK of an up telegram
+      description: |
+        Every telegram other than ACK is answered with an ACK on the up topic.
+        A repeated telegramId is not processed again; the first ACK is resent.
+      tags: [{name: asrs}]
+      message:
+        oneOf:
+          - $ref: "#/components/messages/Store"
+          - $ref: "#/components/messages/Retrieve"
+          - $ref: "#/components/messages/Move"
+          - $ref: "#/components/messages/Cancel"
+          - $ref: "#/components/messages/StateRequest"
+          - $ref: "#/components/messages/Ack"
+  asrs/v1/{asrsId}/up:
+    description: PLC to WCS telegrams. Not retained.
+    parameters:
+      asrsId: {$ref: "#/components/parameters/asrsId"}
+    bindings:
+      mqtt: {qos: 1, retain: false}
+    subscribe:
+      operationId: publishUpTelegram
+      summary: The emulator publishes an ACK, a job outcome or a unit or port event
+      description: |
+        Unacknowledged telegrams are retransmitted with the same telegramId after
+        2 s, at most 3 times. An accepted job ends in exactly one JOB_DONE or
+        JOB_FAILED; a RETRIEVE's JOB_DONE is followed by a PORT_ARRIVAL.
+      tags: [{name: asrs}]
+      message:
+        oneOf:
+          - $ref: "#/components/messages/Ack"
+          - $ref: "#/components/messages/JobDone"
+          - $ref: "#/components/messages/JobFailed"
+          - $ref: "#/components/messages/UnitState"
+          - $ref: "#/components/messages/PortArrival"
+
+components:
+  parameters:
+    manufacturer:
+      description: Robot manufacturer, as in the VDA 5050 header.
+      schema: {type: string, examples: [acme]}
+    serialNumber:
+      description: Robot serial number.
+      schema: {type: string, examples: [amr-01]}
+    asrsId:
+      description: AS/RS identifier.
+      schema: {type: string, examples: [asrs-1]}
+
+  messages:
+    Order:
+      name: Order
+      title: VDA 5050 order
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Order"}
+      examples:
+        - name: pickOrder
+          payload:
+            headerId: 0
+            timestamp: "2026-11-19T10:15:30.000Z"
+            version: "3.0.0"
+            manufacturer: acme
+            serialNumber: amr-01
+            orderId: order-1
+            orderUpdateId: 0
+            nodes:
+              - {nodeId: n1, sequenceId: 0, released: true, nodePosition: {x: 0, y: 0, mapId: floor-1}, actions: []}
+              - nodeId: n2
+                sequenceId: 2
+                released: true
+                nodePosition: {x: 5, y: 0, mapId: floor-1}
+                actions:
+                  - actionType: pick
+                    actionId: a1
+                    blockingType: HARD
+                    actionParameters: [{key: loadId, value: container-1}]
+            edges:
+              - {edgeId: e1, sequenceId: 1, released: true, startNodeId: n1, endNodeId: n2, actions: []}
+    InstantActions:
+      name: InstantActions
+      title: VDA 5050 instant actions
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/InstantActions"}
+      examples:
+        - name: cancel
+          payload:
+            headerId: 1
+            timestamp: "2026-11-19T10:16:00.000Z"
+            version: "3.0.0"
+            manufacturer: acme
+            serialNumber: amr-01
+            actions: [{actionType: cancelOrder, actionId: ia1, blockingType: HARD}]
+    State:
+      name: State
+      title: VDA 5050 state
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/State"}
+      examples:
+        - name: driving
+          payload:
+            headerId: 12
+            timestamp: "2026-11-19T10:15:32.000Z"
+            version: "3.0.0"
+            manufacturer: acme
+            serialNumber: amr-01
+            orderId: order-1
+            orderUpdateId: 0
+            lastNodeId: n1
+            lastNodeSequenceId: 0
+            nodeStates: [{nodeId: n2, sequenceId: 2, released: true}]
+            edgeStates: [{edgeId: e1, sequenceId: 1, released: true}]
+            mobileRobotPosition: {x: 1.5, y: 0, theta: 0, mapId: floor-1, localized: true}
+            driving: true
+            paused: false
+            actionStates: [{actionId: a1, actionType: pick, actionStatus: WAITING}]
+            instantActionStates: []
+            powerSupply: {stateOfCharge: 97.5, charging: false}
+            operatingMode: AUTOMATIC
+            errors: []
+            information: []
+            safetyState: {activeEmergencyStop: NONE, fieldViolation: false}
+    Connection:
+      name: Connection
+      title: VDA 5050 connection
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Connection"}
+      examples:
+        - name: online
+          payload:
+            headerId: 0
+            timestamp: "2026-11-19T10:15:00.000Z"
+            version: "3.0.0"
+            manufacturer: acme
+            serialNumber: amr-01
+            connectionState: ONLINE
+    Factsheet:
+      name: Factsheet
+      title: VDA 5050 factsheet (subset)
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Factsheet"}
+      examples:
+        - name: amr
+          payload:
+            headerId: 0
+            timestamp: "2026-11-19T10:15:00.000Z"
+            version: "3.0.0"
+            manufacturer: acme
+            serialNumber: amr-01
+            typeSpecification: {seriesName: EMU-AMR, maximumLoadMass: 50, localizationTypes: [NATURAL], navigationTypes: [AUTONOMOUS]}
+            physicalParameters: {minimumSpeed: 0, maximumSpeed: 1.5}
+    Store:
+      name: STORE
+      title: STORE telegram
+      summary: Store a container from an input port into a position.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Store"}
+      examples:
+        - name: store
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b01
+            type: STORE
+            timestamp: "2026-11-19T10:15:30.000Z"
+            jobId: job-1
+            containerId: container-1
+            portId: in-1
+            to: {aisle: 1, level: 2, slot: 10, depth: 1}
+    Retrieve:
+      name: RETRIEVE
+      title: RETRIEVE telegram
+      summary: Retrieve a container from a position to an output port.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Retrieve"}
+      examples:
+        - name: retrieve
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b02
+            type: RETRIEVE
+            timestamp: "2026-11-19T10:15:31.000Z"
+            jobId: job-2
+            containerId: container-1
+            portId: out-1
+            from: {aisle: 1, level: 2, slot: 10, depth: 1}
+    Move:
+      name: MOVE
+      title: MOVE telegram
+      summary: Move a container between two positions.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Move"}
+      examples:
+        - name: move
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b03
+            type: MOVE
+            timestamp: "2026-11-19T10:15:32.000Z"
+            jobId: job-3
+            containerId: container-1
+            from: {aisle: 1, level: 2, slot: 10, depth: 1}
+            to: {aisle: 1, level: 3, slot: 4, depth: 2}
+    Cancel:
+      name: CANCEL
+      title: CANCEL telegram
+      summary: Cancel a queued job.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Cancel"}
+      examples:
+        - name: cancel
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b04
+            type: CANCEL
+            timestamp: "2026-11-19T10:15:33.000Z"
+            jobId: job-3
+    StateRequest:
+      name: STATE_REQUEST
+      title: STATE_REQUEST telegram
+      summary: Ask for the state of the units.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/StateRequest"}
+      examples:
+        - name: stateRequest
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b05
+            type: STATE_REQUEST
+            timestamp: "2026-11-19T10:15:34.000Z"
+    Ack:
+      name: ACK
+      title: ACK telegram
+      summary: Acknowledges a received telegram.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/Ack"}
+      examples:
+        - name: refused
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b06
+            type: ACK
+            timestamp: "2026-11-19T10:15:30.100Z"
+            ackTelegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b01
+            accepted: false
+            reason: UNKNOWN_PORT
+    JobDone:
+      name: JOB_DONE
+      title: JOB_DONE telegram
+      summary: A job completed.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/JobDone"}
+      examples:
+        - name: done
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b07
+            type: JOB_DONE
+            timestamp: "2026-11-19T10:15:50.000Z"
+            jobId: job-1
+    JobFailed:
+      name: JOB_FAILED
+      title: JOB_FAILED telegram
+      summary: An accepted job failed when it started.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/JobFailed"}
+      examples:
+        - name: failed
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b08
+            type: JOB_FAILED
+            timestamp: "2026-11-19T10:15:51.000Z"
+            jobId: job-2
+            reason: CONTAINER_NOT_AT_POSITION
+    UnitState:
+      name: UNIT_STATE
+      title: UNIT_STATE telegram
+      summary: State of one aisle unit.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/UnitState"}
+      examples:
+        - name: execute
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b09
+            type: UNIT_STATE
+            timestamp: "2026-11-19T10:15:40.000Z"
+            unitId: A1
+            state: EXECUTE
+    PortArrival:
+      name: PORT_ARRIVAL
+      title: PORT_ARRIVAL telegram
+      summary: A container arrived at a port.
+      contentType: application/json
+      payload: {$ref: "#/components/schemas/PortArrival"}
+      examples:
+        - name: arrival
+          payload:
+            telegramId: 3f1c2a3e-6a52-4a44-9a55-0a1f0d6e1b0a
+            type: PORT_ARRIVAL
+            timestamp: "2026-11-19T10:15:52.000Z"
+            containerId: container-1
+            portId: out-1
+
+  schemas:
+    Header:
+      type: object
+      required: [headerId, timestamp, version, manufacturer, serialNumber]
+      properties:
+        headerId: {type: integer, minimum: 0, description: "Counter per topic, starts at 0 per process start."}
+        timestamp: {type: string, description: "UTC, millisecond precision.", example: "2026-11-19T10:15:30.000Z"}
+        version: {type: string, example: "3.0.0"}
+        manufacturer: {type: string, example: acme}
+        serialNumber: {type: string, example: amr-01}
+    NodePosition:
+      type: object
+      required: [x, y, mapId]
+      properties:
+        x: {type: number}
+        y: {type: number}
+        theta: {type: number}
+        mapId: {type: string}
+    ActionParameter:
+      type: object
+      required: [key, value]
+      properties:
+        key: {type: string, description: "pick uses loadId."}
+        value: {description: "Rendered to a string by the emulator."}
+    Action:
+      type: object
+      required: [actionType, actionId, blockingType]
+      properties:
+        actionType: {type: string}
+        actionId: {type: string}
+        blockingType: {type: string, enum: [NONE, SOFT, HARD], description: "Accepted but ignored; actions run sequentially."}
+        actionParameters:
+          type: array
+          items: {$ref: "#/components/schemas/ActionParameter"}
+    Node:
+      type: object
+      required: [nodeId, sequenceId, released, nodePosition, actions]
+      properties:
+        nodeId: {type: string}
+        sequenceId: {type: integer, minimum: 0}
+        released: {type: boolean}
+        nodePosition: {$ref: "#/components/schemas/NodePosition"}
+        actions:
+          type: array
+          description: "Node actions: pick (loadId), drop, startCharging, stopCharging."
+          items: {$ref: "#/components/schemas/Action"}
+    Edge:
+      type: object
+      required: [edgeId, sequenceId, released, startNodeId, endNodeId, actions]
+      properties:
+        edgeId: {type: string}
+        sequenceId: {type: integer, minimum: 0}
+        released: {type: boolean}
+        startNodeId: {type: string}
+        endNodeId: {type: string}
+        maxSpeed: {type: number}
+        actions:
+          type: array
+          description: Must be empty; edge actions are not supported.
+          maxItems: 0
+          items: {$ref: "#/components/schemas/Action"}
+    Order:
+      allOf:
+        - $ref: "#/components/schemas/Header"
+        - type: object
+          required: [orderId, orderUpdateId, nodes, edges]
+          properties:
+            orderId: {type: string}
+            orderUpdateId: {type: integer, minimum: 0}
+            nodes:
+              type: array
+              minItems: 1
+              items: {$ref: "#/components/schemas/Node"}
+            edges:
+              type: array
+              items: {$ref: "#/components/schemas/Edge"}
+    InstantActions:
+      allOf:
+        - $ref: "#/components/schemas/Header"
+        - type: object
+          required: [actions]
+          properties:
+            actions:
+              type: array
+              items: {$ref: "#/components/schemas/Action"}
+    NodeState:
+      type: object
+      required: [nodeId, sequenceId, released]
+      properties:
+        nodeId: {type: string}
+        sequenceId: {type: integer, minimum: 0}
+        released: {type: boolean}
+    EdgeState:
+      type: object
+      required: [edgeId, sequenceId, released]
+      properties:
+        edgeId: {type: string}
+        sequenceId: {type: integer, minimum: 0}
+        released: {type: boolean}
+    ActionState:
+      type: object
+      required: [actionId, actionStatus]
+      properties:
+        actionId: {type: string}
+        actionType: {type: string}
+        actionStatus: {type: string, enum: [WAITING, RUNNING, FINISHED, FAILED]}
+    Error:
+      type: object
+      required: [errorType, errorLevel]
+      properties:
+        errorType:
+          type: string
+          description: Open enumeration. LOAD_NOT_AVAILABLE, ROBOT_BLOCKED and BATTERY_EMPTY are emulator extensions.
+          examples: [VALIDATION_FAILURE, INVALID_ORDER, OUTDATED_ORDER_UPDATE, SAME_ORDER_UPDATE_ID, NO_ORDER_TO_CANCEL, INVALID_INSTANT_ACTION, LOAD_NOT_AVAILABLE, ROBOT_BLOCKED, BATTERY_EMPTY]
+        errorLevel: {type: string, enum: [WARNING, URGENT, CRITICAL, FATAL]}
+        errorDescription: {type: string}
+    State:
+      allOf:
+        - $ref: "#/components/schemas/Header"
+        - type: object
+          required: [orderId, orderUpdateId, lastNodeId, lastNodeSequenceId, nodeStates, edgeStates, driving, paused, actionStates, instantActionStates, powerSupply, operatingMode, errors, information, safetyState]
+          properties:
+            orderId: {type: string, description: "Kept after cancelOrder."}
+            orderUpdateId: {type: integer, minimum: 0}
+            lastNodeId: {type: string}
+            lastNodeSequenceId: {type: integer, minimum: 0}
+            nodeStates: {type: array, items: {$ref: "#/components/schemas/NodeState"}}
+            edgeStates: {type: array, items: {$ref: "#/components/schemas/EdgeState"}}
+            mobileRobotPosition:
+              type: object
+              required: [x, y, theta, mapId, localized]
+              properties:
+                x: {type: number}
+                y: {type: number}
+                theta: {type: number}
+                mapId: {type: string}
+                localized: {type: boolean}
+            driving: {type: boolean}
+            paused: {type: boolean, description: Always false.}
+            actionStates: {type: array, items: {$ref: "#/components/schemas/ActionState"}}
+            instantActionStates: {type: array, items: {$ref: "#/components/schemas/ActionState"}}
+            powerSupply:
+              type: object
+              required: [stateOfCharge, charging]
+              properties:
+                stateOfCharge: {type: number, minimum: 0, maximum: 100}
+                charging: {type: boolean}
+            operatingMode: {type: string, enum: [AUTOMATIC]}
+            errors: {type: array, items: {$ref: "#/components/schemas/Error"}}
+            information: {type: array, items: {}}
+            safetyState:
+              type: object
+              required: [activeEmergencyStop, fieldViolation]
+              properties:
+                activeEmergencyStop: {type: string, enum: [NONE]}
+                fieldViolation: {type: boolean}
+            loads:
+              type: array
+              description: Present only while a load is carried.
+              items:
+                type: object
+                required: [loadId]
+                properties:
+                  loadId: {type: string}
+    Connection:
+      allOf:
+        - $ref: "#/components/schemas/Header"
+        - type: object
+          required: [connectionState]
+          properties:
+            connectionState: {type: string, enum: [ONLINE, OFFLINE, CONNECTION_BROKEN]}
+    Factsheet:
+      allOf:
+        - $ref: "#/components/schemas/Header"
+        - type: object
+          required: [typeSpecification, physicalParameters]
+          properties:
+            typeSpecification:
+              type: object
+              required: [seriesName, maximumLoadMass, localizationTypes, navigationTypes]
+              properties:
+                seriesName: {type: string}
+                maximumLoadMass: {type: number}
+                localizationTypes: {type: array, items: {type: string}}
+                navigationTypes: {type: array, items: {type: string}}
+            physicalParameters:
+              type: object
+              required: [minimumSpeed, maximumSpeed]
+              properties:
+                minimumSpeed: {type: number}
+                maximumSpeed: {type: number}
+    Position:
+      type: object
+      required: [aisle, level, slot, depth]
+      properties:
+        aisle: {type: integer}
+        level: {type: integer}
+        slot: {type: integer}
+        depth: {type: integer, enum: [1, 2], description: "1 front, 2 back (double-deep racks only)."}
+    TelegramBase:
+      type: object
+      required: [telegramId, type, timestamp]
+      properties:
+        telegramId: {type: string, format: uuid}
+        timestamp: {type: string, description: "RFC 3339 UTC with milliseconds."}
+    Store:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [jobId, containerId, portId, to]
+          properties:
+            type: {const: STORE}
+            jobId: {type: string}
+            containerId: {type: string}
+            portId: {type: string, description: Input port.}
+            to: {$ref: "#/components/schemas/Position"}
+    Retrieve:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [jobId, containerId, portId, from]
+          properties:
+            type: {const: RETRIEVE}
+            jobId: {type: string}
+            containerId: {type: string}
+            portId: {type: string, description: Output port.}
+            from: {$ref: "#/components/schemas/Position"}
+    Move:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [jobId, containerId, from, to]
+          properties:
+            type: {const: MOVE}
+            jobId: {type: string}
+            containerId: {type: string}
+            from: {$ref: "#/components/schemas/Position"}
+            to: {$ref: "#/components/schemas/Position"}
+    Cancel:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [jobId]
+          properties:
+            type: {const: CANCEL}
+            jobId: {type: string}
+    StateRequest:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          properties:
+            type: {const: STATE_REQUEST}
+    Ack:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [ackTelegramId, accepted]
+          properties:
+            type: {const: ACK}
+            ackTelegramId: {type: string, description: The telegramId being acknowledged.}
+            accepted: {type: boolean}
+            reason:
+              type: string
+              description: Bare code, present when not accepted.
+              enum: [UNKNOWN_PORT, WRONG_PORT_KIND, INVALID_POSITION, DUPLICATE_JOB, AISLE_MISMATCH, UNKNOWN_JOB, JOB_RUNNING, MALFORMED]
+    JobDone:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [jobId]
+          properties:
+            type: {const: JOB_DONE}
+            jobId: {type: string}
+    JobFailed:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [jobId, reason]
+          properties:
+            type: {const: JOB_FAILED}
+            jobId: {type: string}
+            reason:
+              type: string
+              description: Bare code.
+              enum: [CONTAINER_NOT_AT_PORT, CONTAINER_NOT_AT_POSITION, POSITION_OCCUPIED, POSITION_BLOCKED, PORT_OCCUPIED]
+    UnitState:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [unitId, state]
+          properties:
+            type: {const: UNIT_STATE}
+            unitId: {type: string, description: "A<aisle>.", examples: [A1]}
+            state: {type: string, enum: [IDLE, EXECUTE, HELD], description: PackML names.}
+    PortArrival:
+      allOf:
+        - $ref: "#/components/schemas/TelegramBase"
+        - type: object
+          required: [portId]
+          properties:
+            type: {const: PORT_ARRIVAL}
+            containerId: {type: string, description: Absent means no-read.}
+            portId: {type: string}
