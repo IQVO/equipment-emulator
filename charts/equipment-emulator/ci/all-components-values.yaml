@@ -23,6 +23,12 @@ config:
   simSpeed: "10"
   tickInterval: "50ms"
   worldFile: /etc/emulator/world.yaml
+otel:
+  enabled: true
+  endpoint: "otel-collector.example.invalid:4317"
+  serviceName: "equipment-emulator-ci"
+serviceVersion: "v9.9.9-ci"
+environment: "ci"
 extraEnv:
   - name: EXTRA_FLAG
     value: "1"

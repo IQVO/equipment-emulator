@@ -66,6 +66,26 @@ world:
         - {id: OUT1, aisle: 1, kind: OUTPUT, nodeId: ASRS1-OUT1}
         - {id: IN2, aisle: 2, kind: INPUT, nodeId: ASRS1-IN2}
 
+# Observability (ADR 0005). With otel.enabled the Deployment renders
+# OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_SERVICE_NAME; with it off neither is
+# rendered and the emulator installs no exporter (an empty endpoint means
+# telemetry off). Export is non-blocking: a Collector that is down costs
+# telemetry, never readiness.
+otel:
+  enabled: true
+  endpoint: "otel-collector.observability.svc.cluster.local:4317"
+  serviceName: "equipment-emulator"
+
+# SERVICE_VERSION (service.version): empty falls back to image.tag, then the
+# chart appVersion.
+serviceVersion: ""
+
+# ENVIRONMENT: deployment.environment.name on every span and metric.
+environment: "production"
+
+# Extra env vars appended to the container as a raw list. The chart refuses the
+# names it renders itself (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME,
+# SERVICE_VERSION, ENVIRONMENT): set otel.*, serviceVersion or environment.
 extraEnv: []
 
 livenessProbe:

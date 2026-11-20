@@ -49,3 +49,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "equipment-emulator.image" -}}
 {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
 {{- end }}
+
+{{/*
+The chart renders the observability env itself (ADR 0005); extraEnv must not
+shadow it.
+*/}}
+{{- define "equipment-emulator.requireNoOwnedEnv" -}}
+{{- $owned := list "ENVIRONMENT" "SERVICE_VERSION" "OTEL_SERVICE_NAME" "OTEL_EXPORTER_OTLP_ENDPOINT" -}}
+{{- range .Values.extraEnv -}}
+{{- if has (toString .name) $owned -}}
+{{- fail (printf "extraEnv sets %s: the chart renders it itself (otel.*, serviceVersion, environment); set the value there, never twice." .name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
