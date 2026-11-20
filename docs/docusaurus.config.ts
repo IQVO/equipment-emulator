@@ -2,12 +2,23 @@ import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
+import {copyFileSync, mkdirSync, rmSync} from 'node:fs';
+import {join} from 'node:path';
 
 // The protocol references and the packaging record stay canonical at
 // docs/<name>.md (cited from Go code, apis/asyncapi.yaml, SPEC.md and
-// IQVO/asrs-control). `npm run build` / `npm start` first copy them into the
-// git-ignored reference/ dir (scripts/sync-reference.mjs), which a third docs
-// instance serves under /docs/reference.
+// IQVO/asrs-control). Loading this config copies them into the git-ignored
+// reference/ dir, which a third docs instance serves under /docs/reference.
+// The copy runs on every docusaurus command (build, start, gen-api-docs), so
+// the instance's folder always exists. A docs instance cannot use docs/ itself
+// as its path: its MDX loader would also claim every page under docs/docs/.
+const referencePages = ['vda5050-subset.md', 'telegram-protocol.md', 'before-first-release.md'];
+rmSync(join(__dirname, 'reference'), {recursive: true, force: true});
+mkdirSync(join(__dirname, 'reference'), {recursive: true});
+for (const page of referencePages) {
+  copyFileSync(join(__dirname, page), join(__dirname, 'reference', page));
+}
+
 const plainMarkdown = /[\\/]docs[\\/](adr|reference)[\\/]/;
 
 const config: Config = {

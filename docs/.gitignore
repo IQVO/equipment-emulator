@@ -19,5 +19,5 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Copied from docs/*.md by scripts/sync-reference.mjs
+# Copied from docs/*.md when docusaurus.config.ts loads
 /reference

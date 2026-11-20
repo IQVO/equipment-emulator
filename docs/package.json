@@ -4,9 +4,7 @@
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
-    "prestart": "node scripts/sync-reference.mjs",
     "start": "docusaurus start",
-    "prebuild": "node scripts/sync-reference.mjs",
     "build": "docusaurus build",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",
@@ -16,8 +14,7 @@
     "write-heading-ids": "docusaurus write-heading-ids",
     "typecheck": "tsc",
     "gen-api-docs": "docusaurus gen-api-docs equipment-emulator",
-    "clean-api-docs": "docusaurus clean-api-docs equipment-emulator",
-    "sync-reference": "node scripts/sync-reference.mjs"
+    "clean-api-docs": "docusaurus clean-api-docs equipment-emulator"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
