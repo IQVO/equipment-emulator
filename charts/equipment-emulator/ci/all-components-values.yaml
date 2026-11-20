@@ -1,0 +1,44 @@
+# Used by `helm lint` / `ct lint`: every optional value set at once. The
+# emulator has one component (Deployment + Service + ConfigMap + ServiceAccount)
+# and no database, Kafka, MCP, A2A or gateway values (docs/adr/0001).
+replicaCount: 1
+image:
+  repository: ghcr.io/iqvo/equipment-emulator
+  tag: "ci"
+imagePullSecrets:
+  - name: ghcr-pull
+serviceAccount:
+  create: true
+  name: equipment-emulator-ci
+  annotations:
+    example.invalid/role: emulator
+podAnnotations:
+  example.invalid/scrape: "false"
+podLabels:
+  tier: wcs-test
+mqtt:
+  url: tcp://mosquitto.example.invalid:1883
+config:
+  httpAddr: ":8080"
+  simSpeed: "10"
+  tickInterval: "50ms"
+  worldFile: /etc/emulator/world.yaml
+extraEnv:
+  - name: EXTRA_FLAG
+    value: "1"
+nodeSelector:
+  kubernetes.io/os: linux
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: wcs
+    effect: NoSchedule
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+            - key: kubernetes.io/os
+              operator: In
+              values: [linux]

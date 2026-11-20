@@ -35,8 +35,8 @@ simulation loop.
 | `TICK_INTERVAL` | `100ms` | Wall-clock interval between simulation ticks |
 
 **Simulated time.** `internal/domain/simclock` holds a monotonic simulated clock that only the
-engine advances: each tick advances it by `TICK_INTERVAL × SIM_SPEED` (a non-positive speed freezes
-the simulation). It starts at process start. Every published message is stamped with simulated
+engine advances: each tick advances it by `TICK_INTERVAL × SIM_SPEED` (`internal/config` refuses a
+non-positive `SIM_SPEED` or `TICK_INTERVAL` at boot). It starts at process start. Every published message is stamped with simulated
 time, except the robots' static `CONNECTION_BROKEN` last will; the AS/RS 2 s retransmit timer runs
 on real time. At `SIM_SPEED` 10 a full shift runs in a tenth of its length.
 
