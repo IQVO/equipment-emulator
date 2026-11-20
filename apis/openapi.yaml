@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: Equipment Emulator Admin API
+  version: 1.0.0
+  description: |
+    The admin API of the WCS equipment emulator, test infrastructure that stands in
+    for ISA-95 levels 1 and 0: AMR robots speaking VDA 5050 v3 and an AS/RS PLC
+    speaking telegram protocol v1, both over MQTT. This REST API only inspects the
+    simulated world, injects faults and seeds stock; it never carries robot or PLC
+    traffic and never calls a sibling context.
+
+    Fault injection is idempotent by construction: a fault is switched on or off
+    with `active`, so repeating a request converges to the same state.
+
+    Errors are RFC 7807 problem documents served as `application/problem+json`.
+    There is no authentication layer (fleet decision 2026-09-11).
+  contact:
+    name: equipment-emulator maintainers
+    url: https://github.com/IQVO/equipment-emulator
+  license:
+    name: UNLICENSED
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Robots
+    description: Inspection of the simulated AMR robots.
+  - name: Asrs
+    description: Inspection and seeding of the simulated AS/RS.
+  - name: Faults
+    description: Fault injection into robots and the AS/RS.
+  - name: Health
+    description: Liveness and readiness probes.
+
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe
+      description: 200 while the process is running.
+      tags: [Health]
+      responses:
+        "200":
+          description: Alive.
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe
+      description: 200 when the robot gateway and every AS/RS gateway are connected to the MQTT broker, 503 otherwise.
+      tags: [Health]
+      responses:
+        "200":
+          description: Ready.
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /robots:
+    get:
+      operationId: listRobots
+      summary: List the simulated robots
+      description: Returns a snapshot of every simulated robot, ordered by serial number.
+      tags: [Robots]
+      responses:
+        "200":
+          description: The robots.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Robot"
+  /asrs/{asrsId}:
+    get:
+      operationId: getAsrs
+      summary: Get an AS/RS snapshot
+      description: Returns the stored containers, the port contents and the state of each aisle unit of one AS/RS.
+      tags: [Asrs]
+      parameters:
+        - $ref: "#/components/parameters/AsrsId"
+      responses:
+        "200":
+          description: The AS/RS view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsrsView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /faults:
+    post:
+      operationId: injectFault
+      summary: Switch a fault on or off
+      description: |
+        Switches a fault on (`active` true) or off. `ROBOT_BLOCKED`, `ROBOT_BATTERY`
+        and `ROBOT_DISCONNECT` target a robot serial number; `ASRS_UNIT` (with
+        `aisle`) and `ASRS_NO_READ` (with `port`) target an AS/RS id. `value` is the
+        state of charge for `ROBOT_BATTERY`. `ASRS_NO_READ` applies only to an
+        OUTPUT port (only a RETRIEVE's arrival is read); naming an INPUT port is a
+        409 `WRONG_PORT_KIND`, an unknown port a 409 `UNKNOWN_PORT`.
+      tags: [Faults]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Fault"
+      responses:
+        "204":
+          description: The fault was applied.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /asrs/{asrsId}/seeds:
+    post:
+      operationId: seedContainer
+      summary: Seed a container into a storage position
+      description: Places a container directly into a storage position, bypassing the PLC; used to prepare a scenario.
+      tags: [Asrs]
+      parameters:
+        - $ref: "#/components/parameters/AsrsId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Seed"
+      responses:
+        "204":
+          description: The container was stored.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /asrs/{asrsId}/ports/{portId}/container:
+    post:
+      operationId: placeContainerAtPort
+      summary: Place a container at a port
+      description: Puts a container on a port as if an operator had delivered it; 409 with the reject reason when the port is occupied or unknown.
+      tags: [Asrs]
+      parameters:
+        - $ref: "#/components/parameters/AsrsId"
+        - name: portId
+          in: path
+          required: true
+          description: The port identifier.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortContainer"
+      responses:
+        "204":
+          description: The container is at the port.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+components:
+  parameters:
+    AsrsId:
+      name: asrsId
+      in: path
+      required: true
+      description: The AS/RS identifier.
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: The request body is malformed or a required field is missing.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: The robot or AS/RS is unknown.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: The AS/RS rejected the command; `detail` carries the reject reason, for example PORT_OCCUPIED.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unprocessable:
+      description: The request is well formed but cannot be applied.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    ServiceUnavailable:
+      description: Not ready; the MQTT broker is not connected.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Fault:
+      type: object
+      required: [kind, target, active]
+      properties:
+        kind:
+          type: string
+          enum: [ROBOT_BLOCKED, ROBOT_BATTERY, ROBOT_DISCONNECT, ASRS_UNIT, ASRS_NO_READ]
+        target: { type: string, description: Robot serial number or AS/RS id. }
+        aisle: { type: integer, description: Aisle for ASRS_UNIT. }
+        port: { type: string, description: Port id for ASRS_NO_READ. }
+        active: { type: boolean }
+        value: { type: number, description: State of charge for ROBOT_BATTERY. }
+    Position:
+      type: object
+      required: [aisle, level, slot, depth]
+      properties:
+        aisle: { type: integer }
+        level: { type: integer }
+        slot: { type: integer }
+        depth: { type: integer }
+    Seed:
+      type: object
+      required: [position, containerId]
+      properties:
+        position:
+          $ref: "#/components/schemas/Position"
+        containerId: { type: string }
+    PortContainer:
+      type: object
+      required: [containerId]
+      properties:
+        containerId: { type: string }
+    Robot:
+      type: object
+      required: [serialNumber, orderId, lastNodeId, x, y, driving, stateOfCharge, charging, errors]
+      properties:
+        serialNumber: { type: string }
+        orderId: { type: string }
+        lastNodeId: { type: string }
+        x: { type: number }
+        y: { type: number }
+        driving: { type: boolean }
+        stateOfCharge: { type: number }
+        charging: { type: boolean }
+        loadId: { type: string }
+        errors:
+          type: array
+          items: { type: string }
+    UnitView:
+      type: object
+      required: [id, state, currentJob, queued]
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [IDLE, EXECUTE, HELD] }
+        currentJob: { type: string }
+        queued: { type: integer }
+    AsrsView:
+      type: object
+      required: [id, slots, ports, units]
+      properties:
+        id: { type: string }
+        slots:
+          type: object
+          description: Storage position (for example A1-L1-S1-D1) to container id.
+          additionalProperties: { type: string }
+        ports:
+          type: object
+          description: Port id to container id; an empty string means the port is empty.
+          additionalProperties: { type: string }
+        units:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnitView"
+    Problem:
+      type: object
+      description: RFC 7807 problem document used for every non-2xx response.
+      required: [type, title, status, detail]
+      properties:
+        type: { type: string, example: "about:blank" }
+        title: { type: string }
+        status: { type: integer, format: int32 }
+        detail: { type: string }

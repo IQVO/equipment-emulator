@@ -1,0 +1,17 @@
+# world.yaml is mounted at the directory of config.worldFile; the scalar
+# settings are mirrored as env via envFrom.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "equipment-emulator.fullname" . }}
+  labels:
+    {{- include "equipment-emulator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: emulator
+data:
+  MQTT_URL: {{ .Values.mqtt.url | quote }}
+  HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
+  SIM_SPEED: {{ .Values.config.simSpeed | quote }}
+  TICK_INTERVAL: {{ .Values.config.tickInterval | quote }}
+  WORLD_FILE: {{ .Values.config.worldFile | quote }}
+  world.yaml: |
+    {{- toYaml .Values.world | nindent 4 }}

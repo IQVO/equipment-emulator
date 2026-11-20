@@ -1,0 +1,98 @@
+# Default values for equipment-emulator: one Deployment, one Service, one
+# ConfigMap holding world.yaml. No database, no Kafka.
+
+replicaCount: 1
+
+image:
+  repository: warehouse/equipment-emulator
+  pullPolicy: IfNotPresent
+  tag: "local"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+mqtt:
+  url: tcp://mosquitto.warehouse-systems.svc.cluster.local:1883
+
+config:
+  httpAddr: ":8080"
+  simSpeed: "1"
+  tickInterval: "100ms"
+  # Mount path of the world file (the ConfigMap is mounted at its directory).
+  worldFile: /etc/emulator/world.yaml
+
+# Rendered into the ConfigMap as world.yaml (see config/world.example.yaml).
+world:
+  robots:
+    - {manufacturer: EMU, serialNumber: R1, startX: 0, startY: 0, mapId: S1, speed: 1.5, drainPerMeter: 0.02, chargePerSecond: 0.5, actionSeconds: 3}
+    - {manufacturer: EMU, serialNumber: R2, startX: 2, startY: 0, mapId: S1, speed: 1.5, drainPerMeter: 0.02, chargePerSecond: 0.5, actionSeconds: 3}
+    - {manufacturer: EMU, serialNumber: R3, startX: 4, startY: 0, mapId: S1, speed: 1.5, drainPerMeter: 0.02, chargePerSecond: 0.5, actionSeconds: 3}
+  asrs:
+    - id: ASRS1
+      aisles: 2
+      levels: 8
+      slots: 40
+      doubleDeep: true
+      baseSeconds: 6
+      perLevelSeconds: 1.5
+      perSlotSeconds: 0.2
+      ports:
+        - {id: IN1, aisle: 1, kind: INPUT, nodeId: ASRS1-IN1}
+        - {id: OUT1, aisle: 1, kind: OUTPUT, nodeId: ASRS1-OUT1}
+        - {id: IN2, aisle: 2, kind: INPUT, nodeId: ASRS1-IN2}
+
+extraEnv: []
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+resources:
+  limits:
+    cpu: 250m
+    memory: 128Mi
+  requests:
+    cpu: 25m
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
