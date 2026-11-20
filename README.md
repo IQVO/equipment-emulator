@@ -84,11 +84,20 @@ WORLD_FILE=config/world.example.yaml SIM_SPEED=10 go run ./cmd/emulator
 | `HTTP_ADDR` | `:8080` | Admin API listen address |
 | `SIM_SPEED` | `1` | Simulated seconds per wall-clock second (must be positive) |
 | `TICK_INTERVAL` | `100ms` | Wall-clock interval between simulation ticks |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP/gRPC Collector endpoint; empty turns telemetry off |
+| `OTEL_SERVICE_NAME` | `equipment-emulator` | `service.name` |
+| `SERVICE_VERSION` | `dev` | `service.version` |
+| `ENVIRONMENT` | `local` | `deployment.environment.name` |
 
 ## Observability
 
-Structured JSON logs on stdout (`log/slog`); no metrics and no traces yet. The
-fleet OpenTelemetry standard is a later wave.
+The fleet OpenTelemetry standard ([ADR 0005](docs/adr/0005-opentelemetry-traces-and-metrics.md)):
+JSON logs on stdout carrying `trace_id`/`span_id`, and traces and metrics over OTLP/gRPC
+once `OTEL_EXPORTER_OTLP_ENDPOINT` is set (the chart sets it). Spans cover every admin
+request, every VDA 5050 message and every telegram (robot serial, telegram id and type);
+metrics count orders by outcome, telegrams by direction and type, retransmits and
+expiries, robots by state, and the simulated-time ratio. Details:
+[docs/docs/operations/observability.md](docs/docs/operations/observability.md).
 
 ## API
 

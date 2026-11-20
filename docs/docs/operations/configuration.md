@@ -17,6 +17,13 @@ on an invalid value.
 | `HTTP_ADDR` | `:8080` | Admin API listen address |
 | `SIM_SPEED` | `1` | Simulated seconds per wall-clock second; must be positive |
 | `TICK_INTERVAL` | `100ms` | Wall-clock interval between simulation ticks; must be a positive duration |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP/gRPC Collector endpoint (host:port or URL); empty turns telemetry off |
+| `OTEL_SERVICE_NAME` | `equipment-emulator` | `service.name` of every span and metric |
+| `SERVICE_VERSION` | `dev` | `service.version` |
+| `ENVIRONMENT` | `local` | `deployment.environment.name` |
+
+The four observability variables are read by `cmd/emulator/telemetry.go` and the
+telemetry adapter ([Observability](/docs/operations/observability)).
 
 ## World file
 
@@ -61,7 +68,12 @@ mounted with `envFrom` and the `world:` value into `world.yaml`, mounted at
 | `config.tickInterval` | `100ms` | `TICK_INTERVAL` |
 | `config.worldFile` | `/etc/emulator/world.yaml` | `WORLD_FILE` |
 | `world` | three robots, one AS/RS | `world.yaml` in the ConfigMap |
-| `extraEnv` | `[]` | extra container env entries |
+| `otel.enabled` | `true` | renders the two `OTEL_*` variables below |
+| `otel.endpoint` | `otel-collector.observability.svc.cluster.local:4317` | `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| `otel.serviceName` | `equipment-emulator` | `OTEL_SERVICE_NAME` |
+| `serviceVersion` | empty (`image.tag`, then `appVersion`) | `SERVICE_VERSION` |
+| `environment` | `production` | `ENVIRONMENT` |
+| `extraEnv` | `[]` | extra container env entries; the four observability names are refused |
 
 There are no database, Kafka, MCP, A2A or gateway values: the emulator has none of
 those surfaces ([ADR 0001](/docs/adr/0001-emulator-role-and-boundaries)).

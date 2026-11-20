@@ -41,8 +41,10 @@ internal/domain/simclock/      monotonic simulated clock
 internal/application/engine/   the world: steps devices, routes pick/drop to AS/RS ports, faults
 internal/adapters/vda5050/     VDA 5050 v3 wire messages and mapping
 internal/adapters/telegram/    telegram codec, ACK deduplication, retransmitter
-internal/adapters/mqtt/        paho clients: one per robot, one per AS/RS
+internal/adapters/mqtt/        paho clients: one per robot, one per AS/RS; a span per message
 internal/adapters/inbound/http admin REST API (chi), application/problem+json errors
+internal/adapters/inbound/requestlog  access-log middleware of the admin API
+internal/adapters/outbound/telemetry  OpenTelemetry setup, trace-correlated logs, the emulator's metrics (ADR 0005)
 internal/config/               environment and world file
 ```
 
