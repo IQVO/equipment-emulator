@@ -62,7 +62,7 @@ func validate(o Order) error {
 
 func (r *Robot) reject(err error) error {
 	re := err.(*RejectError)
-	r.errs = append(r.errs, Error{Type: re.Type, Level: LevelWarning, Description: re.Reason})
+	r.addError(Error{Type: re.Type, Level: LevelWarning, Description: re.Reason})
 	return err
 }
 
@@ -71,6 +71,7 @@ func (r *Robot) start(o Order) {
 	r.order, r.orderID, r.updateID = &cp, o.ID, o.UpdateID
 	r.next, r.atNode, r.actionIdx, r.actionElapsed = 0, true, 0, 0
 	r.actionStates = map[string]ActionState{}
+	r.instantStates, r.instantOrder = map[string]ActionState{}, nil // a new order starts a clean report
 	r.errs = nil
 	r.registerActions(cp.Nodes)
 	r.traverse(0)

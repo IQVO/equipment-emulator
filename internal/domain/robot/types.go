@@ -82,6 +82,10 @@ const (
 	ErrBatteryEmpty         = "BATTERY_EMPTY"
 )
 
+// MaxReported bounds the robot's errors and instantActionStates: only the most
+// recent MaxReported of each are kept and reported.
+const MaxReported = 50
+
 // Error is one active robot error.
 type Error struct {
 	Type        string

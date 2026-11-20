@@ -23,6 +23,7 @@ type Robot struct {
 	actionElapsed time.Duration
 	actionStates  map[string]ActionState
 	instantStates map[string]ActionState
+	instantOrder  []string // instantStates ids, oldest first, for the MaxReported bound
 
 	lastNodeID string
 	lastSeq    uint32
@@ -135,7 +136,7 @@ func (r *Robot) runActions(remaining *time.Duration, p Peripherals) bool {
 		if err := r.complete(a, n.ID, p); err != nil {
 			st.Status = ActionFailed
 			r.actionStates[a.ID] = st
-			r.errs = append(r.errs, Error{Type: ErrLoadNotAvailable, Level: LevelWarning, Description: err.Error()})
+			r.addError(Error{Type: ErrLoadNotAvailable, Level: LevelWarning, Description: err.Error()})
 			return false
 		}
 		st.Status = ActionFinished
@@ -217,9 +218,30 @@ func (r *Robot) InstantAction(a Action) error {
 	}
 	if err != nil {
 		st.Status = ActionFailed
-		r.instantStates[a.ID] = st
+		r.setInstantState(st)
 		return r.reject(err)
 	}
-	r.instantStates[a.ID] = st
+	r.setInstantState(st)
 	return nil
+}
+
+// setInstantState records an instant action's state, keeping only the most
+// recent MaxReported ids (a known id is updated in place).
+func (r *Robot) setInstantState(st ActionState) {
+	if _, known := r.instantStates[st.ID]; !known {
+		r.instantOrder = append(r.instantOrder, st.ID)
+		if len(r.instantOrder) > MaxReported {
+			delete(r.instantStates, r.instantOrder[0])
+			r.instantOrder = r.instantOrder[1:]
+		}
+	}
+	r.instantStates[st.ID] = st
+}
+
+// addError records an active error, keeping only the most recent MaxReported.
+func (r *Robot) addError(e Error) {
+	r.errs = append(r.errs, e)
+	if len(r.errs) > MaxReported { // one is added at a time, so dropping the oldest suffices
+		r.errs = r.errs[1:]
+	}
 }
