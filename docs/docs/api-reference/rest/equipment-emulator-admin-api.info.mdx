@@ -1,0 +1,66 @@
+---
+id: equipment-emulator-admin-api
+title: "Equipment Emulator Admin API"
+description: "The admin API of the WCS equipment emulator, test infrastructure that stands in"
+sidebar_label: Introduction
+sidebar_position: 0
+hide_title: true
+custom_edit_url: null
+---
+
+import ApiLogo from "@theme/ApiLogo";
+import Heading from "@theme/Heading";
+import SchemaTabs from "@theme/SchemaTabs";
+import TabItem from "@theme/TabItem";
+import Export from "@theme/ApiExplorer/Export";
+
+<span
+  className={"theme-doc-version-badge badge badge--secondary"}
+  children={"Version: 1.0.0"}
+>
+</span>
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Equipment Emulator Admin API"}
+>
+</Heading>
+
+
+
+The admin API of the WCS equipment emulator, test infrastructure that stands in
+for ISA-95 levels 1 and 0: AMR robots speaking VDA 5050 v3 and an AS/RS PLC
+speaking telegram protocol v1, both over MQTT. This REST API only inspects the
+simulated world, injects faults and seeds stock; it never carries robot or PLC
+traffic and never calls a sibling context.
+
+Fault injection is idempotent by construction: a fault is switched on or off
+with `active`, so repeating a request converges to the same state.
+
+Errors are RFC 7807 problem documents served as `application/problem+json`.
+There is no authentication layer (fleet decision 2026-09-11).
+
+
+<div
+  style={{"display":"flex","flexDirection":"column","marginBottom":"var(--ifm-paragraph-margin-bottom)"}}
+>
+  <h3
+    style={{"marginBottom":"0.25rem"}}
+  >
+    Contact
+  </h3><span>
+    equipment-emulator maintainers: 
+  </span><span>
+    URL: [https://github.com/IQVO/equipment-emulator](https://github.com/IQVO/equipment-emulator)
+  </span>
+</div><div
+  style={{"marginBottom":"var(--ifm-paragraph-margin-bottom)"}}
+>
+  <h3
+    style={{"marginBottom":"0.25rem"}}
+  >
+    License
+  </h3>
+</div>
+      

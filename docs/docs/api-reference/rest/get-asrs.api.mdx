@@ -1,0 +1,70 @@
+---
+id: get-asrs
+title: "Get an AS/RS snapshot"
+description: "Returns the stored containers, the port contents and the state of each aisle unit of one AS/RS."
+sidebar_label: "Get an AS/RS snapshot"
+hide_title: true
+hide_table_of_contents: true
+api: eJy9Vt9T20gM/lc0+0TnnF+0vVL3KQNpLze0R0no3QxhBsVW4oX1rtmVA5lM/vcb2Q4BEq53L/dEWMnSp9Wnb7VSriCPrJ0dpipWc+J+8EFFKqWQeF2IRcXqnLj0NgBnBIGdpxQSZxm1JR+i6rhwnqtDshwAbdo4IxO4GRAmGaAOhqC0muXIWYL+qHM+aqtIMc6Dii9Vlf4qUgV6zInJy+lKWcxJxQqDD8NURUoLqgI5U5HydFdqT6mK2Zf0Evo4a7KATsmynmnykjAkGeWo4pXiZSGxA3tt52q9vpKQoXA2UBD7Ybcrf14Lu9B0LwGb2sUVi8LopLrWzk0Q/9VuPje9oYSf4b9UWooLxrH0QK5U/sqF1ZfipV2sa1w63YN+8/WePM8LGLHzOJe+BS1HcDBzHugB88IQ9Hut015r1Gud9N4Au223QadSLKZp9RWas2eYXt7lpoifwjkT+uj0Za5PgBYoL3gJdUzICRsiVozToTb/N1D1jW5N6D0uhVZM+V6wuz0SYkvXS+/J8u9uqiJ1V1JJ6b/vVBVjxxIpsmUumYYnpwMVqcFfg+OLsfz6bXB6oq7Wz9Lui9wA2Zq0ZZqTr4pnzUbOLqzmH5ru1frpqQzg5nQdqXfdd/vJ793UMTi/Ga4Apb217t7+wywU3k0N5b/8fCZeyM/nY/hw1P0ATQBIXVLmZBnKQClUxF2QX4J1tnX48ACb+W2/aF2VZlNr3YCyVjtGbXYbV8Pa06B6TIQ5U1dyPDVob9X2Fl9pdhn2tCRSM+dz5Pro7aE4N3j2cnfTqLP6Lqo+rSOVE2eu0XDRDtHGWHVEMTurWjfXUjL5xUZUS29UrDLmIu50jEvQZC5wfNQ96u604FTMkNKCjCvk6pXopLYzV6FsMA3uSl1ZYZCXBlnokebaQv9sqCIlmetwvXa3vZtEeIUbf3kiZMz/PB4BPcalJm4ETIFB25nHwL5MuPQEnCHLm2PTANpOrDBjOOq3Pr4HI9AD9KqnqRtD/+t5zeEAoSC8FW35cdKH9933XVi8rdzQNuw+Oz2e2Ec3JkNzj7nQkV3iDCx6EUwdZ+AW5OHr9/G4DeNMBzgfjMZ1MdYsQUuMhCv5mtigq1oohXvnTRqBtjeVdYalad7QQJQGeXKT20+gGazwHBL0XlPYzmCFjz3OZjqpvtv4GRMAIeipEeDVWD5we2In9rMkaVKK/OsgD2ReOBlcmC7Fub5Y7WwMWKMSt3CvOckoBWclt5vNJvZecwbXmLBe0HUEwYGngpAlK4KMoHQrcXZBfk5BZL5aDzBvdoQK08B75wOgJ3h15ANUFE4BA1y/Ji7X7YkdZ+RJ8FoHWHImj3/tCgaX5OFgZogYUkq0sBIOu4e/trofW73em/bENiqGSaVizf7xyMPWhoeQo94sQvJUP45UiDudueasnLYTl3eG33/80dn9XIbd6IRsoCdpLr6dDo8H30aDk+YJDZyjfeLwhXhLzmCxCJnbkc3VVob/jwWuFirhV6cwqK2UVl3HqhGjy2p9U5GKmzXuKlIiOGJZraYY6MKb9VqO70rySxVfXkVqgV7jVNTlcqVSHeR3quIZmvBy13ta8MF5I/tv4LUNcC/izUJgZR1YoCnlPxWpW1pu98+1PMEZYUq+glUb+0lCBT/5bGcNFMl81Okvg7Far/8GaFb0Bw==
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/rest/equipment-emulator-admin-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Get an AS/RS snapshot"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/asrs/{asrsId}"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Returns the stored containers, the port contents and the state of each aisle unit of one AS/RS.
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./get-asrs.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./get-asrs.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./get-asrs.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

@@ -1,0 +1,1 @@
+{"parameters":[{"name":"asrsId","in":"path","required":true,"description":"The AS/RS identifier.","schema":{"type":"string"}},{"name":"portId","in":"path","required":true,"description":"The port identifier.","schema":{"type":"string"}}]}
