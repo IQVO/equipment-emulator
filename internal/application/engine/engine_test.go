@@ -236,3 +236,18 @@ func TestHandleOrderRejectionStaysReachable(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestAnnounceSkipsFaultDisconnectedRobots(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	if err := e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	conns, sheets, states := len(rec.connections), rec.factsheets, len(rec.states)
+	if err := e.Announce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.connections) != conns || rec.factsheets != sheets || len(rec.states) != states {
+		t.Fatalf("announce published for a disconnected robot: %+v", rec)
+	}
+}

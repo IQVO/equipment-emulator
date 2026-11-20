@@ -5,8 +5,10 @@ go 1.27.4
 require (
 	github.com/arch-go/arch-go v1.7.0
 	github.com/eclipse/paho.mqtt.golang v1.5.0
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/uuid v1.6.0
 	github.com/testcontainers/testcontainers-go v0.45.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -65,5 +67,4 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

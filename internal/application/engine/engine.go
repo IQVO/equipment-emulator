@@ -110,13 +110,17 @@ func (p peripherals) Drop(nodeID, loadID string) error {
 	return p.e.systems[pn.AsrsID].PlaceAtPort(pn.PortID, loadID)
 }
 
-// Announce publishes ONLINE, the factsheet and the state of every robot.
+// Announce publishes ONLINE, the factsheet and the state of every robot that is
+// not fault-disconnected; a disconnected robot stays silent until reconnected.
 func (e *Engine) Announce(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := e.clock.Now()
 	var errs []error
 	for _, s := range e.serials {
+		if e.disconnected[s] {
+			continue
+		}
 		r := e.robots[s]
 		st := r.Snapshot()
 		errs = append(errs, e.rp.PublishConnection(ctx, st.Manufacturer, s, connOnline, now),
