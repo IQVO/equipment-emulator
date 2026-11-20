@@ -33,5 +33,5 @@ unleash:
     # string) is read as 0 and the gate NEVER fails. Verified: a package at 95.24% efficacy exits 0
     # with "99" and exits 10 with 99. The values below stay 0 (dormant) until you replace them:
     # efficacy = {{MEASURED_EFFICACY_MINUS_1}}, mutant-coverage = {{MEASURED_MUTANT_COVERAGE_MINUS_1}}.
-    efficacy: 0
-    mutant-coverage: 0
+    efficacy: 70
+    mutant-coverage: 93
