@@ -185,3 +185,56 @@ func TestCancelAndFifo(t *testing.T) {
 		t.Fatalf("cancel unknown: %s", got)
 	}
 }
+
+func TestPortSeedAndFaultGuards(t *testing.T) {
+	s := newSys(t, true)
+	if err := s.PlaceAtPort("IN1", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reason(t, s.PlaceAtPort("IN1", "C2")); got != ReasonPortOccupied {
+		t.Fatalf("occupied: %s", got)
+	}
+	if got := reason(t, s.PlaceAtPort("OUT1", "C2")); got != ReasonWrongPortKind {
+		t.Fatalf("kind: %s", got)
+	}
+	if got := reason(t, s.PlaceAtPort("NOPE", "C2")); got != ReasonUnknownPort {
+		t.Fatalf("unknown: %s", got)
+	}
+	if got := reason(t, s.TakeFromPort("OUT1", "C1")); got != ReasonPortEmpty {
+		t.Fatalf("empty: %s", got)
+	}
+	if got := reason(t, s.TakeFromPort("IN1", "C1")); got != ReasonWrongPortKind {
+		t.Fatalf("take kind: %s", got)
+	}
+	if err := s.Seed(pos(1, 1, 1), "C3"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reason(t, s.Seed(pos(1, 1, 1), "C4")); got != ReasonPositionOccupied {
+		t.Fatalf("seed occupied: %s", got)
+	}
+	if got := reason(t, s.Seed(pos(99, 1, 1), "C4")); got != ReasonInvalidPosition {
+		t.Fatalf("seed invalid: %s", got)
+	}
+	if got := reason(t, s.SetUnitFault(9, true)); got != ReasonInvalidPosition {
+		t.Fatalf("fault: %s", got)
+	}
+	if got := reason(t, s.SetNoRead("NOPE", true)); got != ReasonUnknownPort {
+		t.Fatalf("noread: %s", got)
+	}
+	if err := s.SetNoRead("OUT1", true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnitStatesListsEveryAisle(t *testing.T) {
+	s := newSys(t, false)
+	evs := s.UnitStates()
+	if len(evs) != 2 {
+		t.Fatalf("want one event per aisle, got %d", len(evs))
+	}
+	for _, e := range evs {
+		if e.Kind != EventUnitState {
+			t.Fatalf("kind %v", e.Kind)
+		}
+	}
+}

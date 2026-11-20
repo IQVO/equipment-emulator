@@ -251,3 +251,51 @@ func TestAnnounceSkipsFaultDisconnectedRobots(t *testing.T) {
 		t.Fatalf("announce published for a disconnected robot: %+v", rec)
 	}
 }
+
+func TestEngineAsrsPassThroughsAndUnknownTargets(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	if err := e.Seed("ASRS1", asrs.Position{Aisle: 1, Level: 1, Slot: 1, Depth: 1}, "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.PlaceAtPort("ASRS1", "IN1", "C2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.UnitStates(ctx, "ASRS1"); err != nil || len(rec.events) != 1 {
+		t.Fatalf("unit states: err=%v events=%d", err, len(rec.events))
+	}
+	if err := e.CancelJob("ASRS1", "nope"); err == nil {
+		t.Fatal("cancelling an unknown job must fail")
+	}
+	for name, err := range map[string]error{
+		"seed":   e.Seed("X", asrs.Position{}, "C"),
+		"place":  e.PlaceAtPort("X", "IN1", "C"),
+		"cancel": e.CancelJob("X", "j"),
+		"states": e.UnitStates(ctx, "X"),
+	} {
+		if !errors.Is(err, ErrUnknownAsrs) {
+			t.Errorf("%s: want ErrUnknownAsrs, got %v", name, err)
+		}
+	}
+	if _, ok := e.Asrs("X"); ok {
+		t.Fatal("unknown AS/RS must not be found")
+	}
+	if e.Now().IsZero() {
+		t.Fatal("Now must return the simulated time")
+	}
+}
+
+func TestHandleInstantActionsPublishesFactsheetAndState(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	err := e.HandleInstantActions(ctx, "R1", []robot.Action{{ID: "a1", Type: "factsheetRequest"}, {ID: "a2", Type: "startCharging"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.factsheets != 1 || len(rec.states) == 0 {
+		t.Fatalf("factsheets=%d states=%d", rec.factsheets, len(rec.states))
+	}
+	if err := e.HandleInstantActions(ctx, "NOPE", nil); !errors.Is(err, ErrUnknownRobot) {
+		t.Fatalf("want ErrUnknownRobot, got %v", err)
+	}
+}
