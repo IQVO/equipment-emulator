@@ -119,6 +119,7 @@ func TestPickAtEmptyOutputPortFails(t *testing.T) {
 func TestFaultsAndUnknownTargets(t *testing.T) {
 	e, rec := newEngine(t)
 	ctx := context.Background()
+	before := len(rec.states)
 	if err := e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +128,25 @@ func TestFaultsAndUnknownTargets(t *testing.T) {
 	}
 	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotBattery, Target: "R1", Value: 10})
 	_ = e.Step(ctx, time.Second)
-	n := len(rec.states)
+	if len(rec.states) != before {
+		t.Fatalf("state published while disconnected: %d -> %d", before, len(rec.states))
+	}
 	_ = e.InjectFault(ctx, Fault{Kind: FaultRobotDisconnect, Target: "R1", Active: false})
-	if len(rec.states) != n+1 || rec.states[n].StateOfCharge != 10 {
+	if len(rec.states) != before+1 || rec.states[before].StateOfCharge != 10 {
 		t.Fatal("reconnect should publish the current state")
 	}
 	if err := e.InjectFault(ctx, Fault{Kind: FaultAsrsUnit, Target: "ASRS1", Aisle: 1, Active: true}); err != nil {
 		t.Fatal(err)
+	}
+	_ = e.Step(ctx, time.Second)
+	held := false
+	for _, ev := range rec.events {
+		if ev.Kind == asrs.EventUnitState && ev.State == asrs.UnitHeld {
+			held = true
+		}
+	}
+	if !held {
+		t.Fatalf("expected a HELD unit state: %+v", rec.events)
 	}
 	if err := e.HandleOrder(ctx, "NOPE", robot.Order{}); !errors.Is(err, ErrUnknownRobot) {
 		t.Fatalf("err = %v", err)
@@ -147,5 +160,79 @@ func TestBuildRejectsNonPositiveSpeed(t *testing.T) {
 	w := World{Robots: []RobotSpec{{SerialNumber: "R1"}}}
 	if _, _, _, _, err := w.Build(time.Now()); err == nil {
 		t.Fatal("expected error for zero speed")
+	}
+}
+
+func moveOrder() robot.Order {
+	return robot.Order{ID: "o1", Nodes: []robot.Node{
+		{ID: "start", Released: true},
+		{ID: "far", Seq: 2, Released: true, Pos: robot.Position{X: 5}},
+	}, Edges: []robot.Edge{{ID: "e", Seq: 1, Released: true, StartNodeID: "start", EndNodeID: "far"}}}
+}
+
+func TestBlockedRobotDoesNotMove(t *testing.T) {
+	e, _ := newEngine(t)
+	ctx := context.Background()
+	if err := e.InjectFault(ctx, Fault{Kind: FaultRobotBlocked, Target: "R1", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HandleOrder(ctx, "R1", moveOrder()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		_ = e.Step(ctx, time.Second)
+	}
+	s := e.Robots()[0]
+	if s.Position.X != 0 {
+		t.Fatalf("blocked robot moved: %+v", s.Position)
+	}
+	found := false
+	for _, er := range s.Errors {
+		if er.Type == robot.ErrRobotBlocked {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("errors = %+v", s.Errors)
+	}
+}
+
+func TestNoReadOnOutputPortYieldsEmptyContainerID(t *testing.T) {
+	e, rec := newEngine(t)
+	ctx := context.Background()
+	from := asrs.Position{Aisle: 1, Level: 1, Slot: 1, Depth: 1}
+	if err := e.Seed("ASRS1", from, "C5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.InjectFault(ctx, Fault{Kind: FaultAsrsNoRead, Target: "ASRS1", Port: "OUT1", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SubmitJob("ASRS1", asrs.Job{ID: "j2", Kind: asrs.KindRetrieve, ContainerID: "C5", Port: "OUT1", From: from}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 6; i++ {
+		_ = e.Step(ctx, time.Second)
+	}
+	for _, ev := range rec.events {
+		if ev.Kind == asrs.EventPortArrival && ev.PortID == "OUT1" {
+			if ev.ContainerID != "" {
+				t.Fatalf("expected no-read, got %+v", ev)
+			}
+			return
+		}
+	}
+	t.Fatalf("no PORT_ARRIVAL: %+v", rec.events)
+}
+
+func TestHandleOrderRejectionStaysReachable(t *testing.T) {
+	e, _ := newEngine(t)
+	o := moveOrder()
+	o.Nodes[0].ID = "elsewhere"
+	o.Nodes[0].Pos = robot.Position{X: 50}
+	o.Edges[0].StartNodeID = "elsewhere"
+	err := e.HandleOrder(context.Background(), "R1", o)
+	var re *robot.RejectError
+	if !errors.As(err, &re) {
+		t.Fatalf("err = %v", err)
 	}
 }
