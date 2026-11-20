@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 
+	"github.com/IQVO/equipment-emulator/internal/adapters/mqtt"
 	"github.com/IQVO/equipment-emulator/internal/application/engine"
 	"github.com/IQVO/equipment-emulator/internal/domain/asrs"
 	"github.com/IQVO/equipment-emulator/internal/domain/robot"
 )
 
-var errNoEngine = errors.New("engine not ready")
+// errNoEngine is the gateways' transient refusal (ACK reason NOT_READY, not
+// remembered for deduplication).
+var errNoEngine = mqtt.ErrNotReady
 
 // proxy lets the gateways be built before the engine they call into. Every
 // method answers errNoEngine until the engine is set.

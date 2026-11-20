@@ -266,3 +266,16 @@ func TestTimestampsAreSimulatedButTheRetransmitTimerIsReal(t *testing.T) {
 		t.Fatalf("the retransmit timer must run on wall time: %d due", len(resend))
 	}
 }
+
+func TestNotReadyIsRefusedButNotRemembered(t *testing.T) {
+	f := &fakeAsrs{errs: []error{ErrNotReady}}
+	g, _ := testGateway(f)
+	first, _ := g.process(context.Background(), []byte(storeJSON))
+	if *first.Accepted || first.Reason != "NOT_READY" {
+		t.Fatalf("first ACK = %+v, want refused with NOT_READY", first)
+	}
+	second, _ := g.process(context.Background(), []byte(storeJSON)) // the WCS retransmits
+	if !*second.Accepted || second.ID == first.ID || f.submits != 2 {
+		t.Fatalf("the retransmission must be processed: %+v (submits %d)", second, f.submits)
+	}
+}

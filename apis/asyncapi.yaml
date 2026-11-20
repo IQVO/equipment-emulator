@@ -688,8 +688,8 @@ components:
             accepted: {type: boolean}
             reason:
               type: string
-              description: Bare code, present when not accepted.
-              enum: [UNKNOWN_PORT, WRONG_PORT_KIND, INVALID_POSITION, DUPLICATE_JOB, AISLE_MISMATCH, UNKNOWN_JOB, JOB_RUNNING, MALFORMED]
+              description: Bare code, present when not accepted. NOT_READY is transient (the emulator is still starting) and is not remembered for deduplication, so a retransmission is processed afresh.
+              enum: [UNKNOWN_PORT, WRONG_PORT_KIND, INVALID_POSITION, DUPLICATE_JOB, AISLE_MISMATCH, UNKNOWN_JOB, JOB_RUNNING, MALFORMED, NOT_READY]
     JobDone:
       allOf:
         - $ref: "#/components/schemas/TelegramBase"

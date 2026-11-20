@@ -5,7 +5,6 @@ package mqtt
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -172,7 +171,7 @@ func (p asrsProxy) UnitStates(ctx context.Context, id string) error {
 	return (*p.e).UnitStates(ctx, id)
 }
 
-var errNoEngine = errors.New("engine not ready")
+var errNoEngine = ErrNotReady
 
 func asrsPos(level, slot int) asrs.Position {
 	return asrs.Position{Aisle: 1, Level: level, Slot: slot, Depth: 1}

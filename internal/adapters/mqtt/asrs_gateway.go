@@ -13,6 +13,11 @@ import (
 	"github.com/IQVO/equipment-emulator/internal/domain/asrs"
 )
 
+// ErrNotReady is a transient refusal: the commands cannot run yet (the engine
+// is still being built). Its ACK carries the bare reason NOT_READY and is not
+// remembered for deduplication, so the sender's retransmission is processed.
+var ErrNotReady = errors.New("NOT_READY")
+
 type AsrsCommands interface {
 	SubmitJob(asrsID string, j asrs.Job) error
 	CancelJob(asrsID, jobID string) error
@@ -145,7 +150,12 @@ func (g *AsrsGateway) process(ctx context.Context, payload []byte) (reply *teleg
 		cmdErr = errors.New("MALFORMED")
 	}
 	var re *asrs.RejectError
-	if cmdErr != nil && !errors.As(cmdErr, &re) {
+	switch {
+	case errors.Is(cmdErr, ErrNotReady):
+		g.log.Warn("not ready; refused without remembering", "type", t.Type, "telegramId", t.ID)
+		ack := telegram.NewAck(t, ErrNotReady, uuid.NewString(), g.now())
+		return &ack, nil // transient: a retransmission must be processed, not answered from dedup
+	case cmdErr != nil && !errors.As(cmdErr, &re):
 		g.log.Error("command failed", "type", t.Type, "err", cmdErr)
 	}
 	ack := telegram.NewAck(t, cmdErr, uuid.NewString(), g.now())

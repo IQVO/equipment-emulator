@@ -53,7 +53,10 @@ and runs on real time at any `SIM_SPEED`.
    `ackTelegramId` is the received `telegramId`. `accepted: false` with a
    `reason` means the command was refused at once (`UNKNOWN_PORT`,
    `WRONG_PORT_KIND`, `INVALID_POSITION`, `DUPLICATE_JOB`, `AISLE_MISMATCH`,
-   `UNKNOWN_JOB`, `JOB_RUNNING`, `MALFORMED`).
+   `UNKNOWN_JOB`, `JOB_RUNNING`, `MALFORMED`, `NOT_READY`). `NOT_READY` is
+   transient: the emulator is still starting and cannot run commands yet. It
+   is not remembered for deduplication (rule 3 does not apply), so a
+   retransmission of the same telegram is processed afresh.
 2. A sender that receives no ACK within **2 s** retransmits the same telegram
    (same `telegramId`), at most **3** times, then gives up and logs it.
 3. A receiver that sees a `telegramId` again does not process it again; it
