@@ -50,14 +50,29 @@ func secs(s float64) time.Duration { return time.Duration(s * float64(time.Secon
 
 // Build creates the simulation objects described by the world.
 func (w World) Build(start time.Time) (*simclock.Sim, []*robot.Robot, []*asrs.System, map[string]PortNode, error) {
+	robots, err := w.buildRobots()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	systems, nodes, err := w.buildAsrs()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return simclock.NewSim(start), robots, systems, nodes, nil
+}
+
+func (w World) buildRobots() ([]*robot.Robot, error) {
 	var robots []*robot.Robot
 	seen := map[string]bool{}
 	for _, r := range w.Robots {
 		if r.SerialNumber == "" || seen[r.SerialNumber] {
-			return nil, nil, nil, nil, fmt.Errorf("robot serial %q is empty or duplicated", r.SerialNumber)
+			return nil, fmt.Errorf("robot serial %q is empty or duplicated", r.SerialNumber)
+		}
+		if r.Manufacturer == "" {
+			return nil, fmt.Errorf("robot %q manufacturer must not be empty", r.SerialNumber)
 		}
 		if r.Speed <= 0 {
-			return nil, nil, nil, nil, fmt.Errorf("robot %q speed must be positive", r.SerialNumber)
+			return nil, fmt.Errorf("robot %q speed must be positive", r.SerialNumber)
 		}
 		seen[r.SerialNumber] = true
 		robots = append(robots, robot.New(robot.Config{
@@ -67,22 +82,45 @@ func (w World) Build(start time.Time) (*simclock.Sim, []*robot.Robot, []*asrs.Sy
 			ActionDuration: secs(r.ActionSeconds), PositionTolerance: 0.5,
 		}))
 	}
+	return robots, nil
+}
+
+func (w World) buildAsrs() ([]*asrs.System, map[string]PortNode, error) {
 	var systems []*asrs.System
 	nodes := map[string]PortNode{}
+	ids := map[string]bool{}
 	for _, a := range w.Asrs {
-		var ports []asrs.Port
-		for _, p := range a.Ports {
-			ports = append(ports, asrs.Port{ID: p.ID, Aisle: p.Aisle, Kind: asrs.PortKind(p.Kind)})
-			if p.NodeID != "" {
-				nodes[p.NodeID] = PortNode{AsrsID: a.ID, PortID: p.ID}
-			}
+		if a.ID == "" || ids[a.ID] {
+			return nil, nil, fmt.Errorf("asrs id %q is empty or duplicated", a.ID)
+		}
+		ids[a.ID] = true
+		ports, err := a.ports(nodes)
+		if err != nil {
+			return nil, nil, err
 		}
 		s, err := asrs.New(a.ID, asrs.Layout{Aisles: a.Aisles, Levels: a.Levels, Slots: a.Slots, DoubleDeep: a.DoubleDeep, Ports: ports},
 			asrs.Timing{Base: secs(a.BaseSeconds), PerLevel: secs(a.PerLevelSeconds), PerSlot: secs(a.PerSlotSeconds)})
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, err
 		}
 		systems = append(systems, s)
 	}
-	return simclock.NewSim(start), robots, systems, nodes, nil
+	return systems, nodes, nil
+}
+
+// ports converts the port specs and records each port's nodeId in nodes; a
+// nodeId names exactly one port across the whole world.
+func (a AsrsSpec) ports(nodes map[string]PortNode) ([]asrs.Port, error) {
+	var ports []asrs.Port
+	for _, p := range a.Ports {
+		ports = append(ports, asrs.Port{ID: p.ID, Aisle: p.Aisle, Kind: asrs.PortKind(p.Kind)})
+		if p.NodeID == "" {
+			continue
+		}
+		if prev, dup := nodes[p.NodeID]; dup {
+			return nil, fmt.Errorf("port nodeId %q of %s/%s is already used by %s/%s", p.NodeID, a.ID, p.ID, prev.AsrsID, prev.PortID)
+		}
+		nodes[p.NodeID] = PortNode{AsrsID: a.ID, PortID: p.ID}
+	}
+	return ports, nil
 }
