@@ -52,7 +52,13 @@ make harness-test # unit-test the agent hooks
   byte-identical in every repo; add a row in warehouse-harness-template first).
   `.claude/memory/MEMORY.md`: this repo's own durable heuristics.
 - `docs/before-first-release.md`: packaging checklist to finish before the first develop -> main release.
-  ADRs go in docs/adr once the first decision is written.
+- `docs/adr/`: ADRs 0001-0004 (role and boundaries, VDA 5050 subset, telegram protocol v1, simulated
+  time / faults / admin API); index `docs/adr/index.md`.
+- `docs/docs/`: the Docusaurus site (build: `cd docs && npm ci && npm run build`). After an
+  `apis/openapi.yaml` change run `npm run gen-api-docs equipment-emulator` and commit
+  `docs/docs/api-reference/rest` (CI `docs-api-drift`). `docs/vda5050-subset.md`,
+  `docs/telegram-protocol.md` and `docs/before-first-release.md` stay canonical at those paths;
+  `docs/docusaurus.config.ts` copies them into the site whenever it loads.
 
 harness-template: v4
 
