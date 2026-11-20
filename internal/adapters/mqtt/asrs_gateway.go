@@ -67,17 +67,20 @@ func pos(p *telegram.Position) asrs.Position {
 	return asrs.Position{Aisle: p.Aisle, Level: p.Level, Slot: p.Slot, Depth: p.Depth}
 }
 
+// send publishes an up telegram. A tracked telegram is tracked BEFORE it is
+// published: the WCS's ACK can arrive (and be handled) before the publish
+// returns, and must find it.
 func (g *AsrsGateway) send(t telegram.Telegram, track bool) {
 	b, err := telegram.Encode(t)
 	if err != nil {
 		g.log.Error("cannot encode telegram", "type", t.Type, "err", err)
 		return
 	}
-	if err := g.pub(telegram.UpTopic(g.asrsID), b); err != nil {
-		g.log.Warn("publish failed; the retransmitter will retry", "telegramId", t.ID, "err", err)
-	}
 	if track {
 		g.retx.Track(t, g.now())
+	}
+	if err := g.pub(telegram.UpTopic(g.asrsID), b); err != nil {
+		g.log.Warn("publish failed; the retransmitter will retry", "telegramId", t.ID, "err", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package mqtt
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -123,6 +124,10 @@ func deliver(h pahomqtt.MessageHandler, topic string, payloads ...string) {
 const storeJSON = `{"telegramId":"s1","type":"STORE","timestamp":"2026-11-19T08:00:00.000Z","jobId":"j1","containerId":"C1","portId":"IN1","to":{"aisle":1,"level":1,"slot":1,"depth":1}}`
 const cancelJSON = `{"telegramId":"c1","type":"CANCEL","timestamp":"2026-11-19T08:00:00.100Z","jobId":"j1"}`
 
+func ackOf(id string) string {
+	return `{"telegramId":"ack-` + id + `","type":"ACK","timestamp":"2026-11-19T08:00:00.000Z","ackTelegramId":"` + id + `","accepted":true}`
+}
+
 func TestMalformedTelegramNackIsRememberedAndResent(t *testing.T) {
 	g, _ := testGateway(&fakeAsrs{})
 	bad := []byte(`{"telegramId":"m1","type":"BOGUS","timestamp":"2026-11-19T08:00:00.000Z"}`)
@@ -219,5 +224,27 @@ func TestWorkerStopsWhenContextEnds(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if n := len(out.snapshot()); n != 0 {
 		t.Fatalf("handled after stop: %d", n)
+	}
+}
+
+func TestUpTelegramIsTrackedBeforeItIsPublished(t *testing.T) {
+	g, out := testGateway(&fakeAsrs{})
+	// the WCS ACKs so fast that its ACK is handled before publish returns
+	g.pub = func(topic string, b []byte) error {
+		if err := out.pub(topic, b); err != nil {
+			return err
+		}
+		var up struct {
+			ID string `json:"telegramId"`
+		}
+		_ = json.Unmarshal(b, &up)
+		g.process(context.Background(), []byte(ackOf(up.ID)))
+		return nil
+	}
+	if err := g.Publish(context.Background(), []asrs.Event{{Kind: asrs.EventJobDone, JobID: "j1"}}, simStart); err != nil {
+		t.Fatal(err)
+	}
+	if resend, _ := g.retx.Due(time.Now().Add(time.Hour)); len(resend) != 0 {
+		t.Fatalf("an acknowledged telegram is retransmitted: %+v", resend)
 	}
 }
