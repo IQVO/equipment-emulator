@@ -21,7 +21,7 @@ The example world has three robots (`EMU/R1`…`R3`) and one double-deep AS/RS
 
 ```bash
 curl -s localhost:8080/readyz -o /dev/null -w '%{http_code}\n'   # 200 once MQTT is connected
-curl -s localhost:8080/robots
+curl -s localhost:8080/robots | jq '.items'                     # a {items, nextCursor} page
 curl -s localhost:8080/asrs/ASRS1
 ```
 

@@ -12,8 +12,18 @@ info:
     Fault injection is idempotent by construction: a fault is switched on or off
     with `active`, so repeating a request converges to the same state.
 
-    Errors are RFC 7807 problem documents served as `application/problem+json`.
-    There is no authentication layer (fleet decision 2026-09-11).
+    Every POST accepts the fleet `Idempotency-Key` header (ADR 0006). It is
+    OPTIONAL here, unlike the rest of the fleet: without it a POST simply runs;
+    with it a retry under the same key is answered from the store by the replay
+    class of the first answer. Keys live in process memory for 24 hours and are
+    lost when the emulator restarts (the emulator has no database, ADR 0001).
+
+    `GET /robots` pages with `limit` and an opaque keyset `cursor` and answers
+    `{items, nextCursor}`.
+
+    Errors are RFC 7807 problem documents served as `application/problem+json`;
+    `code` is the stable problem slug. There is no authentication layer (fleet
+    decision 2026-09-11).
   contact:
     name: equipment-emulator maintainers
     url: https://github.com/IQVO/equipment-emulator
@@ -57,17 +67,23 @@ paths:
     get:
       operationId: listRobots
       summary: List the simulated robots
-      description: Returns a snapshot of every simulated robot, ordered by serial number.
+      description: |
+        Returns one page of robot snapshots, ordered by serial number. Follow
+        `nextCursor` until it is absent. A query parameter other than `limit` and
+        `cursor` is 400 `unknown-query-parameter`.
       tags: [Robots]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: The robots.
+          description: One page of robots.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Robot"
+                $ref: "#/components/schemas/RobotPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
   /asrs/{asrsId}:
     get:
       operationId: getAsrs
@@ -97,6 +113,8 @@ paths:
         OUTPUT port (only a RETRIEVE's arrival is read); naming an INPUT port is a
         409 `WRONG_PORT_KIND`, an unknown port a 409 `UNKNOWN_PORT`.
       tags: [Faults]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -106,6 +124,9 @@ paths:
       responses:
         "204":
           description: The fault was applied.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -122,6 +143,7 @@ paths:
       tags: [Asrs]
       parameters:
         - $ref: "#/components/parameters/AsrsId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -131,6 +153,9 @@ paths:
       responses:
         "204":
           description: The container was stored.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -152,6 +177,7 @@ paths:
           required: true
           description: The port identifier.
           schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -161,6 +187,9 @@ paths:
       responses:
         "204":
           description: The container is at the port.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -171,7 +200,57 @@ paths:
           $ref: "#/components/responses/Unprocessable"
 
 components:
+  headers:
+    IdempotencyReplayed:
+      description: >-
+        "true" when this response is the stored answer of an earlier request
+        carrying the same Idempotency-Key (the handler did not run again).
+        Absent on the first execution and on a request without a key.
+      schema:
+        type: string
+        enum: ["true"]
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Optional (ADR 0006): 1-128 printable ASCII characters, a client-generated
+        UUID per logical request (a retry reuses it). Without it the request runs
+        unkeyed. A repeated key with the same method, path and body returns the
+        stored answer with Idempotency-Replayed: true: a 2xx, or a final refusal
+        (bad-request, idempotency-key-invalid, robot-not-found, asrs-not-found,
+        unknown-port, wrong-port-kind, invalid-position, unknown-fault-kind). A
+        retryable refusal (port-occupied, position-occupied, asrs-rejected,
+        command-not-applied) is not stored and its key is released, so the retry
+        executes again. With a different method, path or body under a stored
+        answer it is 409 idempotency-key-reused. A 5xx is never stored. A
+        malformed key is 400 idempotency-key-invalid. Answers are kept 24 hours
+        in process memory and are lost on a restart (single replica).
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[!-~]([ -~]*[!-~])?$'
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size, 1-500 (default 100). Out of range, empty or repeated is 400 invalid-limit.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        Opaque keyset cursor taken from the previous page's nextCursor; an
+        undecodable or repeated cursor is 400 invalid-cursor.
+      schema:
+        type: string
     AsrsId:
       name: asrsId
       in: path
@@ -180,25 +259,36 @@ components:
       schema: { type: string }
   responses:
     BadRequest:
-      description: The request body is malformed or a required field is missing.
+      description: >-
+        The request body is malformed or a required field is missing
+        (bad-request), the Idempotency-Key is malformed (idempotency-key-invalid),
+        or a paging parameter is wrong (unknown-query-parameter, invalid-limit,
+        invalid-cursor).
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
     NotFound:
-      description: The robot or AS/RS is unknown.
+      description: The robot or AS/RS is unknown (robot-not-found, asrs-not-found).
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
     Conflict:
-      description: The AS/RS rejected the command; `detail` carries the reject reason, for example PORT_OCCUPIED.
+      description: >-
+        The AS/RS rejected the command; `detail` carries the reject reason, for
+        example PORT_OCCUPIED, and `code` its slug (port-occupied). Also 409
+        idempotency-key-reused: the Idempotency-Key was used with a different
+        method, path or body.
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
     Unprocessable:
-      description: The request is well formed but cannot be applied.
+      description: >-
+        The request is well formed but cannot be applied: unknown-fault-kind, or
+        command-not-applied (publishing the result to the MQTT broker failed;
+        retry).
       content:
         application/problem+json:
           schema:
@@ -242,6 +332,17 @@ components:
       required: [containerId]
       properties:
         containerId: { type: string }
+    RobotPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Robot"
+        nextCursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last page.
     Robot:
       type: object
       required: [serialNumber, orderId, lastNodeId, x, y, driving, stateOfCharge, charging, errors]
@@ -286,9 +387,13 @@ components:
     Problem:
       type: object
       description: RFC 7807 problem document used for every non-2xx response.
-      required: [type, title, status, detail]
+      required: [type, title, status, detail, code]
       properties:
         type: { type: string, example: "about:blank" }
         title: { type: string }
         status: { type: integer, format: int32 }
         detail: { type: string }
+        code:
+          type: string
+          description: The stable problem slug (for example port-occupied); its replay class is listed in ADR 0006.
+          example: port-occupied

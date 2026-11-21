@@ -413,3 +413,11 @@ func TestIsDisconnectedFollowsTheDisconnectFault(t *testing.T) {
 		t.Fatal("R1 is still disconnected after ROBOT_DISCONNECT inactive")
 	}
 }
+
+func TestUnknownFaultKindIsATypedError(t *testing.T) {
+	e, _ := newEngine(t)
+	err := e.InjectFault(context.Background(), Fault{Kind: "NOPE", Target: "R1"})
+	if !errors.Is(err, ErrUnknownFaultKind) || err.Error() != `unknown fault kind "NOPE"` {
+		t.Fatalf("err = %v, want ErrUnknownFaultKind with the kind named", err)
+	}
+}

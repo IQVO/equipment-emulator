@@ -23,6 +23,8 @@ var (
 	// ErrRobotDisconnected: the robot is fault-disconnected (ROBOT_DISCONNECT)
 	// and drops every command, as a robot off the network would never see it.
 	ErrRobotDisconnected = errors.New("robot is fault-disconnected")
+	// ErrUnknownFaultKind: InjectFault got a kind it does not know.
+	ErrUnknownFaultKind = errors.New("unknown fault kind")
 )
 
 type RobotPublisher interface {
@@ -335,6 +337,6 @@ func (e *Engine) InjectFault(ctx context.Context, f Fault) error {
 		}
 		return s.SetNoRead(f.Port, f.Active)
 	default:
-		return fmt.Errorf("unknown fault kind %q", f.Kind)
+		return fmt.Errorf("%w %q", ErrUnknownFaultKind, f.Kind)
 	}
 }

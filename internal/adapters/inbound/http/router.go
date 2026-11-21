@@ -4,15 +4,18 @@ package http
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/riandyrn/otelchi"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 
+	"github.com/IQVO/equipment-emulator/internal/adapters/inbound/http/page"
 	"github.com/IQVO/equipment-emulator/internal/adapters/inbound/requestlog"
 
 	"github.com/IQVO/equipment-emulator/internal/application/engine"
@@ -87,48 +90,49 @@ type faultJSON struct {
 	Value  float64 `json:"value"`
 }
 
-func problem(w http.ResponseWriter, status int, title, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"type": "about:blank", "title": title, "status": status, "detail": detail})
-}
-
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func commandError(w http.ResponseWriter, err error) {
-	var re *asrs.RejectError
-	switch {
-	case errors.Is(err, engine.ErrUnknownRobot), errors.Is(err, engine.ErrUnknownAsrs):
-		problem(w, http.StatusNotFound, "Not Found", err.Error())
-	case errors.As(err, &re):
-		problem(w, http.StatusConflict, "Conflict", re.Reason)
-	default:
-		problem(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
-	}
-}
-
 type handlers struct{ a Admin }
 
-func (h handlers) robots(w http.ResponseWriter, _ *http.Request) {
-	out := []robotJSON{}
-	for _, s := range h.a.Robots() {
-		rj := robotJSON{SerialNumber: s.SerialNumber, OrderID: s.OrderID, LastNodeID: s.LastNodeID, X: s.Position.X, Y: s.Position.Y,
-			Driving: s.Driving, StateOfCharge: s.StateOfCharge, Charging: s.Charging, LoadID: s.LoadID, Errors: []string{}}
-		for _, e := range s.Errors {
-			rj.Errors = append(rj.Errors, e.Type)
-		}
-		out = append(out, rj)
+func toRobotJSON(s robot.State) robotJSON {
+	rj := robotJSON{SerialNumber: s.SerialNumber, OrderID: s.OrderID, LastNodeID: s.LastNodeID, X: s.Position.X, Y: s.Position.Y,
+		Driving: s.Driving, StateOfCharge: s.StateOfCharge, Charging: s.Charging, LoadID: s.LoadID, Errors: []string{}}
+	for _, e := range s.Errors {
+		rj.Errors = append(rj.Errors, e.Type)
 	}
-	writeJSON(w, out)
+	return rj
+}
+
+// robots answers one {items, nextCursor} page, keyset-ordered by serial number.
+func (h handlers) robots(w http.ResponseWriter, req *http.Request) {
+	limit, after, ok := pageParams(w, req)
+	if !ok {
+		return
+	}
+	states := h.a.Robots()
+	slices.SortFunc(states, func(a, b robot.State) int { return strings.Compare(a.SerialNumber, b.SerialNumber) })
+	rows := []robotJSON{}
+	for _, s := range states {
+		if s.SerialNumber <= after {
+			continue
+		}
+		rows = append(rows, toRobotJSON(s))
+		if len(rows) == page.FetchSize(limit) {
+			break
+		}
+	}
+	writeJSON(w, page.Of(rows, limit, func(r robotJSON) page.Position {
+		return page.Position{Sort: r.SerialNumber, ID: r.SerialNumber}
+	}))
 }
 
 func (h handlers) asrs(w http.ResponseWriter, req *http.Request) {
 	v, ok := h.a.Asrs(chi.URLParam(req, "asrsId"))
 	if !ok {
-		problem(w, http.StatusNotFound, "Not Found", "unknown asrs")
+		writeProblem(w, req, asrsNotFound, "unknown asrs")
 		return
 	}
 	writeJSON(w, toAsrsJSON(v))
@@ -137,10 +141,10 @@ func (h handlers) asrs(w http.ResponseWriter, req *http.Request) {
 func (h handlers) fault(w http.ResponseWriter, req *http.Request) {
 	var f faultJSON
 	if err := json.NewDecoder(req.Body).Decode(&f); err != nil {
-		problem(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeProblem(w, req, badRequest, err.Error())
 		return
 	}
-	done(w, h.a.InjectFault(req.Context(), engine.Fault{Kind: engine.FaultKind(f.Kind), Target: f.Target, Aisle: f.Aisle, Port: f.Port, Active: f.Active, Value: f.Value}))
+	done(w, req, h.a.InjectFault(req.Context(), engine.Fault{Kind: engine.FaultKind(f.Kind), Target: f.Target, Aisle: f.Aisle, Port: f.Port, Active: f.Active, Value: f.Value}))
 }
 
 func (h handlers) seed(w http.ResponseWriter, req *http.Request) {
@@ -149,11 +153,11 @@ func (h handlers) seed(w http.ResponseWriter, req *http.Request) {
 		ContainerID string       `json:"containerId"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ContainerID == "" {
-		problem(w, http.StatusBadRequest, "Bad Request", "position and containerId are required")
+		writeProblem(w, req, badRequest, "position and containerId are required")
 		return
 	}
 	p := asrs.Position{Aisle: body.Position.Aisle, Level: body.Position.Level, Slot: body.Position.Slot, Depth: body.Position.Depth}
-	done(w, h.a.Seed(chi.URLParam(req, "asrsId"), p, body.ContainerID))
+	done(w, req, h.a.Seed(chi.URLParam(req, "asrsId"), p, body.ContainerID))
 }
 
 func (h handlers) placeAtPort(w http.ResponseWriter, req *http.Request) {
@@ -161,16 +165,16 @@ func (h handlers) placeAtPort(w http.ResponseWriter, req *http.Request) {
 		ContainerID string `json:"containerId"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ContainerID == "" {
-		problem(w, http.StatusBadRequest, "Bad Request", "containerId is required")
+		writeProblem(w, req, badRequest, "containerId is required")
 		return
 	}
-	done(w, h.a.PlaceAtPort(chi.URLParam(req, "asrsId"), chi.URLParam(req, "portId"), body.ContainerID))
+	done(w, req, h.a.PlaceAtPort(chi.URLParam(req, "asrsId"), chi.URLParam(req, "portId"), body.ContainerID))
 }
 
 // done answers 204 for a nil error and the matching problem otherwise.
-func done(w http.ResponseWriter, err error) {
+func done(w http.ResponseWriter, req *http.Request, err error) {
 	if err != nil {
-		commandError(w, err)
+		writeError(w, req, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -191,17 +195,19 @@ func NewRouter(a Admin, ready func() bool, logger *slog.Logger, serviceName stri
 	r.Use(requestlog.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
 		if !ready() {
-			problem(w, http.StatusServiceUnavailable, "Service Unavailable", "the MQTT broker is not connected")
+			writeProblem(w, req, notReady, "the MQTT broker is not connected")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 	r.Get("/robots", h.robots)
 	r.Get("/asrs/{asrsId}", h.asrs)
-	r.Post("/faults", h.fault)
-	r.Post("/asrs/{asrsId}/seeds", h.seed)
-	r.Post("/asrs/{asrsId}/ports/{portId}/container", h.placeAtPort)
+	// The three commands take the optional Idempotency-Key (ADR 0006); one store per router.
+	keyed := r.With(NewIdempotency(time.Now).Middleware)
+	keyed.Post("/faults", h.fault)
+	keyed.Post("/asrs/{asrsId}/seeds", h.seed)
+	keyed.Post("/asrs/{asrsId}/ports/{portId}/container", h.placeAtPort)
 	return r
 }

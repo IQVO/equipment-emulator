@@ -38,8 +38,18 @@ traffic and never calls a sibling context.
 Fault injection is idempotent by construction: a fault is switched on or off
 with `active`, so repeating a request converges to the same state.
 
-Errors are RFC 7807 problem documents served as `application/problem+json`.
-There is no authentication layer (fleet decision 2026-09-11).
+Every POST accepts the fleet `Idempotency-Key` header (ADR 0006). It is
+OPTIONAL here, unlike the rest of the fleet: without it a POST simply runs;
+with it a retry under the same key is answered from the store by the replay
+class of the first answer. Keys live in process memory for 24 hours and are
+lost when the emulator restarts (the emulator has no database, ADR 0001).
+
+`GET /robots` pages with `limit` and an opaque keyset `cursor` and answers
+`{items, nextCursor}`.
+
+Errors are RFC 7807 problem documents served as `application/problem+json`;
+`code` is the stable problem slug. There is no authentication layer (fleet
+decision 2026-09-11).
 
 
 <div
