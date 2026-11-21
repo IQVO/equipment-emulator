@@ -1,6 +1,9 @@
 package asrs
 
-import "sort"
+import (
+	"slices"
+	"strings"
+)
 
 // UnitStates reports every unit's current state (for a STATE_REQUEST).
 func (s *System) UnitStates() []Event {
@@ -29,6 +32,6 @@ func (s *System) Snapshot() View {
 		}
 		v.Units = append(v.Units, uv)
 	}
-	sort.Slice(v.Units, func(i, j int) bool { return v.Units[i].ID < v.Units[j].ID })
+	slices.SortFunc(v.Units, func(a, b UnitView) int { return strings.Compare(a.ID, b.ID) })
 	return v
 }

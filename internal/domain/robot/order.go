@@ -9,10 +9,10 @@ func (r *Robot) AcceptOrder(o Order) error {
 		return r.reject(err)
 	}
 	if r.order != nil && o.ID == r.order.ID {
-		switch {
-		case o.UpdateID < r.order.UpdateID:
+		if o.UpdateID < r.order.UpdateID {
 			return r.reject(&RejectError{ErrOutdatedUpdate, fmt.Sprintf("update %d is older than %d", o.UpdateID, r.order.UpdateID)})
-		case o.UpdateID == r.order.UpdateID:
+		}
+		if o.UpdateID == r.order.UpdateID {
 			return r.reject(&RejectError{ErrSameUpdateID, fmt.Sprintf("update %d already applied", o.UpdateID)})
 		}
 		return r.applyUpdate(o)

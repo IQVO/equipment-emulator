@@ -1,4 +1,4 @@
-# .gremlins.yaml — mutation-testing configuration for equipment-emulator (fast target: internal/domain/robot).
+# .gremlins.yaml — mutation-testing configuration for equipment-emulator (fast target: every internal/domain package, one run each).
 #
 # gremlins (github.com/go-gremlins/gremlins, pinned to v0.6.0 in CI) reads
 # this file automatically from the Go module root, so the `mutation-fast`
@@ -31,10 +31,14 @@ unleash:
     # WRITE A PLAIN NUMBER, NEVER A QUOTED STRING. gremlins v0.6.0 reads these two keys with
     # a float type assertion (internal/report/report.go `assess`), so `efficacy: "95"` (a YAML
     # string) is read as 0 and the gate NEVER fails.
-    # Measured 2026-11-20 (after the Task 11 robot test hardening), threshold = floor(lower of the
-    # two runs) - 1 so both targets pass:
-    #   make mutation       (./internal/domain/robot): efficacy 94.39%, mutant coverage 97.27%
-    #   make mutation-full  (./internal/domain):       efficacy 86.59%, mutant coverage 98.35%
-    # => efficacy 85, mutant-coverage 96.
-    efficacy: 85
-    mutant-coverage: 96
+    # Measured 2026-11-20 (test/mutation-ratchet-99), fleet standard 99/99:
+    #   make mutation       (per package, ./internal/domain/*/):
+    #     asrs     66 killed, 0 lived, 0 not covered (1 timed out): efficacy 100.00%, mutant coverage 100.00%
+    #     robot   109 killed, 1 lived, 0 not covered:               efficacy  99.09%, mutant coverage 100.00%
+    #     simclock  1 killed, 0 lived, 0 not covered:               efficacy 100.00%, mutant coverage 100.00%
+    #   make mutation-full  (./internal/domain): efficacy 99.44%, mutant coverage 100.00%
+    # The one survivor (robot.go:90:25) is equivalent; MUTATION.md records it and the timed-out one.
+    # Before: efficacy 85 / mutant-coverage 96 (robot 94.59%/97.37%, aggregate 87.50%/98.40%).
+    # => efficacy 99, mutant-coverage 99 (the weakest package, robot at 99.09%, still clears 99).
+    efficacy: 99
+    mutant-coverage: 99
