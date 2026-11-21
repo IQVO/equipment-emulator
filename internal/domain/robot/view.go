@@ -2,7 +2,8 @@ package robot
 
 import (
 	"math"
-	"sort"
+	"slices"
+	"strings"
 )
 
 // Snapshot returns the robot's current state.
@@ -45,7 +46,7 @@ func sortedStates(m map[string]ActionState) []ActionState {
 	for _, s := range m {
 		out = append(out, s)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b ActionState) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
 

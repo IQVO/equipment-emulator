@@ -82,8 +82,8 @@ func (r *Robot) Tick(dt time.Duration, p Peripherals) {
 func (r *Robot) drive(remaining *time.Duration) bool {
 	target := r.order.Nodes[r.next+1]
 	speed := r.cfg.Speed
-	if e := r.order.Edges[r.next]; e.MaxSpeed > 0 && e.MaxSpeed < speed {
-		speed = e.MaxSpeed
+	if e := r.order.Edges[r.next]; e.MaxSpeed > 0 { // 0 = no limit
+		speed = math.Min(speed, e.MaxSpeed)
 	}
 	d := dist(r.pos, target.Pos)
 	capped := false

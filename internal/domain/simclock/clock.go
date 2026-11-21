@@ -27,17 +27,12 @@ func (s *Sim) Now() time.Time {
 func (s *Sim) Advance(d time.Duration) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if d > 0 {
-		s.now = s.now.Add(d)
-	}
+	s.now = s.now.Add(max(d, 0))
 	return s.now
 }
 
 // Scale converts a real-time interval into simulated time at the given
 // speed factor. A non-positive speed freezes the simulation.
 func Scale(real time.Duration, speed float64) time.Duration {
-	if speed <= 0 {
-		return 0
-	}
-	return time.Duration(float64(real) * speed)
+	return time.Duration(float64(real) * max(speed, 0))
 }
