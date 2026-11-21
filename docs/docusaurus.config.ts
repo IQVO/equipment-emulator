@@ -1,0 +1,210 @@
+import {themes as prismThemes} from 'prism-react-renderer';
+import type {Config} from '@docusaurus/types';
+import type * as Preset from '@docusaurus/preset-classic';
+import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
+import {copyFileSync, mkdirSync, rmSync} from 'node:fs';
+import {join} from 'node:path';
+
+// The protocol references and the packaging record stay canonical at
+// docs/<name>.md (cited from Go code, apis/asyncapi.yaml, SPEC.md and
+// IQVO/asrs-control). Loading this config copies them into the git-ignored
+// reference/ dir, which a third docs instance serves under /docs/reference.
+// The copy runs on every docusaurus command (build, start, gen-api-docs), so
+// the instance's folder always exists. A docs instance cannot use docs/ itself
+// as its path: its MDX loader would also claim every page under docs/docs/.
+const referencePages = ['vda5050-subset.md', 'telegram-protocol.md', 'before-first-release.md'];
+rmSync(join(__dirname, 'reference'), {recursive: true, force: true});
+mkdirSync(join(__dirname, 'reference'), {recursive: true});
+for (const page of referencePages) {
+  copyFileSync(join(__dirname, page), join(__dirname, 'reference', page));
+}
+
+const plainMarkdown = /[\\/]docs[\\/](adr|reference)[\\/]/;
+
+const config: Config = {
+  title: 'Equipment emulator',
+  tagline:
+    'Simulated VDA 5050 v3 AMR robots and an AS/RS PLC over MQTT: test infrastructure for the WCS tier (ISA-95 levels 1 and 0), not a bounded context.',
+  favicon: 'img/favicon.svg',
+
+  future: {
+    v4: true,
+    faster: true,
+  },
+
+  url: 'https://iqvo.github.io',
+  baseUrl: '/equipment-emulator/',
+
+  organizationName: 'IQVO',
+  projectName: 'equipment-emulator',
+  deploymentBranch: 'gh-pages',
+  trailingSlash: false,
+
+  onBrokenLinks: 'throw',
+  onBrokenAnchors: 'throw',
+
+  i18n: {
+    defaultLocale: 'en',
+    locales: ['en'],
+  },
+
+  markdown: {
+    mermaid: true,
+    // ADR bodies are immutable, and the protocol references (docs/*.md, cited by
+    // code, specs and sibling repos at those paths) predate this site: parse
+    // both as CommonMark (a stray `<name>` or `{x}` is not MDX there) and do not
+    // fail the build on their links to files outside the docs tree. Every other
+    // page is MDX and a broken link in it still throws.
+    parseFrontMatter: async (params) => {
+      const result = await params.defaultParseFrontMatter(params);
+      if (plainMarkdown.test(params.filePath)) {
+        result.frontMatter.mdx = {...(result.frontMatter.mdx as object), format: 'md'};
+      }
+      return result;
+    },
+    hooks: {
+      onBrokenMarkdownLinks: ({sourceFilePath, url}) => {
+        if (plainMarkdown.test(sourceFilePath) || /^(adr|reference)[\\/]/.test(sourceFilePath)) {
+          return;
+        }
+        throw new Error(`Broken markdown link in ${sourceFilePath}: ${url}`);
+      },
+    },
+  },
+
+  presets: [
+    [
+      'classic',
+      {
+        docs: {
+          sidebarPath: './sidebars.ts',
+          editUrl:
+            'https://github.com/IQVO/equipment-emulator/tree/main/docs/docs/',
+          docItemComponent: '@theme/ApiItem',
+        },
+        blog: false,
+        theme: {
+          customCss: './src/css/custom.css',
+        },
+      } satisfies Preset.Options,
+    ],
+  ],
+
+  plugins: [
+    // The ADRs stay in docs/adr/*.md (other repos link to those paths); this
+    // second docs instance serves them in place under /docs/adr.
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'adr',
+        path: 'adr',
+        routeBasePath: 'docs/adr',
+        sidebarPath: './sidebarsAdr.ts',
+        // Keep the 0001- prefix in URLs/ids so they match the file names.
+        numberPrefixParser: false,
+        editUrl: 'https://github.com/IQVO/equipment-emulator/tree/main/docs/adr/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'reference',
+        path: 'reference',
+        routeBasePath: 'docs/reference',
+        sidebarPath: false,
+        editUrl: ({docPath}: {docPath: string}) =>
+          `https://github.com/IQVO/equipment-emulator/tree/main/docs/${docPath}`,
+      },
+    ],
+    [
+      'docusaurus-plugin-openapi-docs',
+      {
+        id: 'openapi',
+        docsPluginId: 'classic',
+        config: {
+          'equipment-emulator': {
+            // The single source of truth: the same Spectral-linted spec CI
+            // gates on. Never hand-transcribed here.
+            specPath: '../apis/openapi.yaml',
+            outputDir: 'docs/api-reference/rest',
+            sidebarOptions: {
+              groupPathsBy: 'tag',
+              categoryLinkSource: 'tag',
+            },
+            hideSendButton: true,
+          } satisfies OpenApiPlugin.Options,
+        },
+      },
+    ],
+  ],
+
+  themes: ['docusaurus-theme-openapi-docs', '@docusaurus/theme-mermaid'],
+
+  themeConfig: {
+    colorMode: {
+      respectPrefersColorScheme: true,
+    },
+    navbar: {
+      title: 'Equipment emulator',
+      logo: {
+        alt: 'Equipment emulator',
+        src: 'img/logo.svg',
+      },
+      items: [
+        {
+          type: 'docSidebar',
+          sidebarId: 'docsSidebar',
+          position: 'left',
+          label: 'Documentation',
+        },
+        {
+          to: '/docs/api-reference',
+          label: 'API Reference',
+          position: 'left',
+        },
+        {
+          to: '/docs/adr',
+          label: 'ADRs',
+          position: 'left',
+        },
+        {
+          href: 'https://github.com/IQVO/equipment-emulator',
+          label: 'GitHub',
+          position: 'right',
+        },
+      ],
+    },
+    footer: {
+      style: 'dark',
+      links: [
+        {
+          title: 'Documentation',
+          items: [
+            {label: 'Introduction', to: '/docs/overview/introduction'},
+            {label: 'Quickstart', to: '/docs/overview/quickstart'},
+            {label: 'MQTT protocols', to: '/docs/api-reference/mqtt'},
+            {label: 'Testing', to: '/docs/development/testing'},
+            {label: 'API Reference', to: '/docs/api-reference'},
+            {label: 'Architecture decisions', to: '/docs/adr'},
+          ],
+        },
+        {
+          title: 'Source',
+          items: [
+            {label: 'GitHub repository', href: 'https://github.com/IQVO/equipment-emulator'},
+            {label: 'OpenAPI spec', href: 'https://raw.githubusercontent.com/IQVO/equipment-emulator/main/apis/openapi.yaml'},
+            {label: 'AsyncAPI spec', href: 'https://raw.githubusercontent.com/IQVO/equipment-emulator/main/apis/asyncapi.yaml'},
+          ],
+        },
+      ],
+      copyright: `Equipment emulator — warehouse-systems test infrastructure. Built ${new Date().getFullYear()}. This project is a domain-driven design study. It is not associated with, endorsed by or affiliated with any company, and it uses no company's code, data, logos or trademarks. All names, figures and examples are illustrative or synthetic.`,
+    },
+    prism: {
+      theme: prismThemes.github,
+      darkTheme: prismThemes.dracula,
+      additionalLanguages: ['bash', 'go', 'json', 'yaml', 'sql'],
+    },
+  } satisfies Preset.ThemeConfig,
+};
+
+export default config;

@@ -3,128 +3,53 @@ name: how-to-add-a-rest-endpoint
 description: Add or change a REST endpoint in this service in the fleet's hexagonal order (domain invariant, use case, port, HTTP adapter, apis/openapi.yaml, generated docs, godog scenario). Use when touching internal/adapters/inbound/http, apis/openapi.yaml, or exposing a use case over HTTP.
 ---
 
-<!-- TEMPLATE NOTE (warehouse-harness-template v2): adapt every repo-specific example in this file (file paths, type names, field names) to THIS repo real code. Do not copy-paste verbatim. -->
+# How to add a REST endpoint (the emulator's admin API)
 
-# How to add a REST endpoint
+The admin API only inspects and perturbs the simulation; devices are commanded over MQTT, never
+over REST. Read `.claude/rules/rest-api.md` first. Work domain first, adapter last.
 
-Use when asked to add a new REST use case/endpoint to this service. Follow
-this order — domain first, adapter last — never the reverse; writing the
-HTTP handler before the domain invariant it enforces produces handlers
-that validate nothing and use cases that get bypassed.
+## 1. Domain: does the simulation already support it?
 
-This walks the exact path `POST /bins/{binId}/cycle-count` took in
-inventory-storage (its run_cycle_count use case under
-internal/application/usecases/ and the `handleRunCycleCount` handler in its
-HTTP server adapter) as the concrete worked example — read those two files
-in that repo alongside this guide until this service has its own first
-endpoint to point at.
+The rule lives in `internal/domain/robot` (`Robot`) or `internal/domain/asrs` (`System`), with a
+table-driven unit test, BEFORE any adapter change. Example: `asrs.System.SetNoRead` refuses an input
+port with `WRONG_PORT_KIND` in the domain, not in the handler. No JSON tags in the domain
+(`TestDomainHasNoJSONTags`).
 
-## 1. Domain first: does an invariant already exist, or do you need one?
+## 2. Application: an engine operation
 
-Check `internal/domain/<aggregate>/` for the rule this endpoint enforces.
-A REST endpoint should almost never contain business logic itself — it
-decodes a request, calls a use case, encodes the result. If the operation
-needs a new domain rule (e.g. "a counted quantity below zero is invalid"),
-add it to the aggregate/value-object in internal/domain/, with its own
-table-driven unit test, BEFORE touching the application or adapter layers.
+Add a method to `engine.Engine` (`internal/application/engine/engine.go`) that takes `e.mu`, looks
+the device up (`e.robot(serial)` / `e.system(id)`, which wrap `ErrUnknownRobot` / `ErrUnknownAsrs`)
+and calls the domain method. Publish through the `RobotPublisher` / `AsrsPublisher` ports only.
+Test it in `engine_test.go` with the `recorder` publisher (`newEngine(t)`): success path and failure path.
 
-## 2. Application: define the use case
+## 3. Adapter: the HTTP handler
 
-Add a new file in internal/application/usecases/ (one file per use
-case, this repo's convention — not one giant `usecases.go`). Shape:
+In `internal/adapters/inbound/http/router.go`:
 
-```go
-package usecases
+1. Add the method to the `Admin` interface (the engine satisfies it).
+2. Add a handler on `handlers`: decode the body (400 problem on a bad body or missing field),
+   call `Admin`, answer with `writeJSON` or `done` (204, or `commandError`: 404 unknown device,
+   409 `asrs.RejectError`, 422 otherwise).
+3. Register the route in `NewRouter`. JSON structs live only in this package.
+4. Add an httptest in `router_test.go`: one success and one error path.
 
-type <Verb><Noun>Result struct {
-    // fields the caller needs back — domain types, not DTOs
-}
+## 4. Contract
 
-// <Verb><Noun> — one sentence: what business capability this represents,
-// and the domain rule it enforces (mirror RunCycleCount's doc comment,
-// which states the Unlocated-on-shortfall rule right in the doc comment).
-type <Verb><Noun> struct {
-    Repo   ports.<Aggregate>Repo   // driven ports only — never a concrete adapter
-    Events ports.EventPublisher    // if this raises a domain event
-    Clock  ports.Clock             // if it needs "now" (never call time.Now() directly)
-}
+Add the path to `apis/openapi.yaml` (operationId, request/response schemas, `application/problem+json`
+for each error) and lint it the way the `api-lint` CI job does (`.spectral.yaml`). The
+`spec-breaking` job fails a breaking change against develop; see `docs/spec-breaking-kit.md`.
+Update the route list in `.claude/rules/rest-api.md` and the table in `SPEC.md`.
 
-func (uc *<Verb><Noun>) Execute(ctx context.Context, /* domain-typed args */) (<Verb><Noun>Result, error) {
-    // 1. load aggregate(s) via the port
-    // 2. call the aggregate's own method to apply the rule (never inline
-    //    the invariant here — that belongs in internal/domain/)
-    // 3. persist via the port
-    // 4. publish the domain event via Events, if any
-    // 5. return the result
-}
-```
+## 5. Behaviour
 
-Add the port to internal/application/ports/ if it doesn't exist yet —
-ports are interfaces ONLY (`TestPortsAreCustomerOwned`/
-`TestApplicationPortsContainOnlyInterfaces`-style fitness tests in
-`internal/architecture/` enforce this; a struct or function in a ports
-package fails CI).
+If the endpoint drives a test scenario (a new fault, a new seed), extend `features/*.feature` and
+`features/steps_test.go` (godog, real HTTP against the engine).
 
-Write the use case's unit test against the in-memory adapter
-(internal/adapters/outbound/memory/) — never a real Postgres/HTTP call
-in a unit test. Cover the success path AND the domain-rule failure path.
-
-## 3. Adapter: wire the HTTP handler
-
-In internal/adapters/inbound/http/:
-
-1. `dto.go` — add the request/response DTO structs (JSON tags, this repo's
-   naming convention: `<verb><noun>Request`/`<verb><noun>Response`).
-   DTOs live ONLY in the adapter layer — domain types never carry JSON
-   tags.
-2. `server.go` — add the route (`r.Post("/path/{param}", s.handle<Name>)`
-   in the router setup) and the handler function:
-   - decode + validate the request (`decodeJSON`), converting to domain
-     value objects immediately (`shared.NewBinId`, `shared.NewQuantity`,
-     etc.) — a bad value fails here as an RFC 7807 validation error, never
-     reaches the use case
-   - call the use case's `Execute`
-   - map use-case errors to HTTP status via `writeError` (check
-     `errors.go` for the existing error→status mapping before adding a new
-     error type)
-   - encode the domain result back to the response DTO and `writeJSON`
-3. Add the new use case field to the `Server`/`Deps` struct and wire it in
-   the composition root (`cmd/<service>/main.go`).
-
-Write at least one httptest per endpoint: one success path, one error
-path (validation failure AND/OR the domain-rule failure, whichever this
-endpoint can produce).
-
-## 4. Contract: update OpenAPI, then regenerate docs
-
-Add the path to apis/openapi.yaml (request/response schemas, the RFC
-7807 problem-detail response for each error case — see the existing
-`/bins/{binId}/cycle-count` entry for the shape).
-
-Regenerate the Docusaurus REST reference — this repo's `docs-api-drift`
-CI job fails the PR if you skip this:
+## 6. Verify
 
 ```bash
-cd docs
-npm run clean-api-docs   # or the repo's own script name — check package.json
-npm run gen-api-docs
+make check-fast   # fmt-check + vet + arch-test
+make check-all    # + coverage (90% on domain and application) + bdd
 ```
 
-## 5. Behaviour: add a godog scenario
-
-If this endpoint is user-facing behaviour (not purely internal
-plumbing), add a `.feature` file under `features/` exercising it
-end-to-end against the real HTTP server — see inventory-storage's
-cycle_count feature file for the exact shape the `bdd` CI job expects (Given/When/Then over
-real HTTP, not mocked).
-
-## 6. Verify before opening the PR
-
-```bash
-make check       # fmt-check vet build lint test
-make check-all    # + coverage (90% gate) + arch-test + bdd
-```
-
-`make coverage` gates `./internal/domain/...,./internal/application/...`
-at 90% — a new use case with no test on its failure path is the most
-common way to miss this gate.
+Never add auth middleware (`TestNoAuthMiddlewareReintroduced`).

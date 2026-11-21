@@ -1,0 +1,21 @@
+# Example world: three robots and one double-deep AS/RS with one input and one output port.
+# Port nodeIds are the VDA 5050 nodes where robots drop at or pick from the port;
+# amr-fleet-control's map must use the same node ids.
+robots:
+  - {manufacturer: EMU, serialNumber: R1, startX: 0, startY: 0, mapId: S1, speed: 1.5, drainPerMeter: 0.02, chargePerSecond: 0.5, actionSeconds: 3}
+  - {manufacturer: EMU, serialNumber: R2, startX: 2, startY: 0, mapId: S1, speed: 1.5, drainPerMeter: 0.02, chargePerSecond: 0.5, actionSeconds: 3}
+  - {manufacturer: EMU, serialNumber: R3, startX: 4, startY: 0, mapId: S1, speed: 1.5, drainPerMeter: 0.02, chargePerSecond: 0.5, actionSeconds: 3}
+asrs:
+  - id: ASRS1
+    aisles: 2
+    levels: 8
+    slots: 40
+    doubleDeep: true
+    baseSeconds: 6
+    perLevelSeconds: 1.5
+    perSlotSeconds: 0.2
+    ports:
+      - {id: IN1, aisle: 1, kind: INPUT, nodeId: ASRS1-IN1}
+      - {id: OUT1, aisle: 1, kind: OUTPUT, nodeId: ASRS1-OUT1}
+      - {id: IN2, aisle: 2, kind: INPUT, nodeId: ASRS1-IN2}
+      - {id: OUT2, aisle: 2, kind: OUTPUT, nodeId: ASRS1-OUT2}

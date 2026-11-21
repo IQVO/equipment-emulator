@@ -3,8 +3,8 @@
 `equipment-emulator` (GitHub org `IQVO`, Go module github.com/IQVO/equipment-emulator, scaffolded from
 warehouse-harness-template) is test infrastructure standing in for ISA-95 levels 1 and 0 of the WCS tier:
 AMR robots (VDA 5050 v3) and an AS/RS PLC (telegram protocol v1). Not a bounded context: no Kafka, no
-Postgres, no CloudEvents. Its richest aggregate is package `robot`; binaries live under cmd/ (added by later
-tasks).
+Postgres, no CloudEvents. Its richest aggregate is package `robot`; the one binary is `cmd/emulator`. Longer
+description: `SPEC.md`.
 
 ## Hard rules (each one cost an incident or is fitness-tested)
 
@@ -12,22 +12,19 @@ tasks).
    the application layer only on domain and application; inbound and outbound adapters never depend on each
    other; only cmd/ wires layers. No JSON tags, SQL or HTTP types in the domain. `make arch-test` enforces it
    (`internal/architecture/architecture_test.go`).
-2. **Real infrastructure at runtime.** A cmd/ binary never imports the in-memory adapters (test doubles only;
+2. **Test doubles never reach cmd/.** A cmd/ binary never imports the in-memory adapters (test doubles only;
    real adapters only at runtime): `TestRuntimeBinaryHasNoInMemoryAdapters`. No `.go` file at the
    module root (`TestNoGoFilesAtRepoRoot`); the godog runner lives in features/.
-3. **No auth layer on REST or MCP** (fleet-wide revert 2026-09-11): never add bearer/JWT/API-key middleware
-   (`TestNoAuthMiddlewareReintroduced`). Agent authority is declared per MCP tool / A2A skill instead
-   (`.claude/rules/fleet/agent-authority.md`).
-4. **No outbound calls to sibling contexts without an ADR.** Cross-context data arrives as events kept in
-   local copies (`.claude/rules/fleet/context-boundaries.md`).
-5. **An ADR comes first** for a new cross-context contract or any auth. 
-6. **Domain purity.** internal/domain imports only the stdlib and other domain packages; the application
-   layer never imports adapters; only cmd/ wires adapters.
-7. **Wire formats.** Robots speak VDA 5050 v3.0.0 over MQTT at QoS 1. The AS/RS PLC speaks telegram
+3. **No auth layer on REST** (fleet-wide revert 2026-09-11): never add bearer/JWT/API-key middleware
+   (`TestNoAuthMiddlewareReintroduced`).
+4. **No calls to sibling contexts.** The emulator speaks only MQTT (VDA 5050, AS/RS telegrams) and its admin
+   REST API (`.claude/rules/fleet/context-boundaries.md`).
+5. **An ADR comes first** for a new cross-context contract or any auth.
+6. **Wire formats.** Robots speak VDA 5050 v3.0.0 over MQTT at QoS 1. The AS/RS PLC speaks telegram
    protocol v1 on topics `asrs/v1/<asrsId>/down` and `asrs/v1/<asrsId>/up`.
-8. **REST is unauthenticated** (fleet rule) and every error is `application/problem+json`.
-9. **No Kafka, no Postgres, no CloudEvents.** This is not a bounded context; do not add them.
-10. **GitFlow.** Feature branches, PR into develop. Never push develop or main directly after the initial
+7. **REST is unauthenticated** (fleet rule) and every error is `application/problem+json`.
+8. **No Kafka, no Postgres, no CloudEvents.** This is not a bounded context; do not add them.
+9. **GitFlow.** Feature branches, PR into develop. Never push develop or main directly after the initial
     push, and never use `--no-verify`.
 
 ## Commands
@@ -36,13 +33,14 @@ tasks).
 make check-fast   # fmt-check + vet + arch-test: run before saying "done"
 make check        # fmt-check vet build lint test
 make check-all    # check + coverage + arch-test + bdd (the full local gate)
-make integration  # real Postgres/Kafka via testcontainers (needs Docker)
+make integration  # go test -tags=integration: MQTT broker via testcontainers (needs Docker)
 make mutation     # gremlins on the richest aggregate (thresholds in .gremlins.yaml, measured first)
 make guide-lint   # these guides: skills load, references resolve, context budget
 make harness-test # unit-test the agent hooks
 ```
 
-Binaries and their env vars/ports are documented here as each cmd/ binary lands (later tasks).
+`cmd/emulator` reads `WORLD_FILE` (required), `MQTT_URL` (`tcp://localhost:1883`), `HTTP_ADDR` (`:8080`),
+`SIM_SPEED` (`1`) and `TICK_INTERVAL` (`100ms`); see README.md and `config/world.example.yaml`.
 
 ## Where things are written down (read before editing the matching area)
 
@@ -54,7 +52,13 @@ Binaries and their env vars/ports are documented here as each cmd/ binary lands 
   byte-identical in every repo; add a row in warehouse-harness-template first).
   `.claude/memory/MEMORY.md`: this repo's own durable heuristics.
 - `docs/before-first-release.md`: packaging checklist to finish before the first develop -> main release.
-  ADRs go in docs/adr once the first decision is written.
+- `docs/adr/`: ADRs 0001-0004 (role and boundaries, VDA 5050 subset, telegram protocol v1, simulated
+  time / faults / admin API); index `docs/adr/index.md`.
+- `docs/docs/`: the Docusaurus site (build: `cd docs && npm ci && npm run build`). After an
+  `apis/openapi.yaml` change run `npm run gen-api-docs equipment-emulator` and commit
+  `docs/docs/api-reference/rest` (CI `docs-api-drift`). `docs/vda5050-subset.md`,
+  `docs/telegram-protocol.md` and `docs/before-first-release.md` stay canonical at those paths;
+  `docs/docusaurus.config.ts` copies them into the site whenever it loads.
 
 harness-template: v4
 

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: equipment-emulator
+description: Equipment emulator - VDA 5050 v3 AMR robots and an AS/RS PLC (telegram protocol) over MQTT, with an admin REST API
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/IQVO/equipment-emulator
+keywords:
+  - emulator
+  - vda5050
+  - mqtt
+  - golang

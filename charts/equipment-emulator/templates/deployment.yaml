@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "equipment-emulator.fullname" . }}
+  labels:
+    {{- include "equipment-emulator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: emulator
+spec:
+  # One replica only: the emulator owns the simulated world's state.
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "equipment-emulator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: emulator
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "equipment-emulator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: emulator
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "equipment-emulator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "equipment-emulator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "equipment-emulator.fullname" . }}
+          env:
+            - name: MQTT_URL
+              value: {{ .Values.mqtt.url | quote }}
+            - name: HTTP_ADDR
+              value: {{ .Values.config.httpAddr | quote }}
+            - name: WORLD_FILE
+              value: {{ .Values.config.worldFile | quote }}
+            - name: SIM_SPEED
+              value: {{ .Values.config.simSpeed | quote }}
+            - name: TICK_INTERVAL
+              value: {{ .Values.config.tickInterval | quote }}
+            # Observability env (ADR 0005), read by cmd/emulator/telemetry.go
+            # and the telemetry adapter; not ConfigMap keys.
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: SERVICE_VERSION
+              value: {{ .Values.serviceVersion | default .Values.image.tag | default .Chart.AppVersion | quote }}
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.otel.serviceName | quote }}
+            {{- end }}
+            {{- include "equipment-emulator.requireNoOwnedEnv" . }}
+            {{- range .Values.extraEnv }}
+            - {{ toYaml . | nindent 14 | trim }}
+            {{- end }}
+          volumeMounts:
+            - name: world
+              mountPath: {{ dir .Values.config.worldFile }}
+              readOnly: true
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: world
+          configMap:
+            name: {{ include "equipment-emulator.fullname" . }}
+            items:
+              - key: world.yaml
+                path: {{ base .Values.config.worldFile }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

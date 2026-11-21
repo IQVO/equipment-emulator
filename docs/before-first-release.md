@@ -1,34 +1,24 @@
 # Before the first release: equipment-emulator
 
-The first merge to `main` runs `docker-publish` and `release`. Two services built from
-this template (pick-face-replenishment, task-interleaving) each needed a rework because
-packaging was missing or wrong when that moment came. Work through this list on a feature
-branch, **before** the first `develop` → `main` PR. Delete a row only when the service
-really does not have that part, and say so in the PR.
+The first merge to `main` runs `docker-publish` and `release`. Two services scaffolded from
+warehouse-harness-template (pick-face-replenishment, task-interleaving) each needed a rework because
+packaging was missing or wrong when that moment came. Work through this list on a feature branch,
+**before** the first `develop` → `main` PR (there is no `main` yet). The emulator has no database,
+no Kafka and no consumer groups, so the template's rows for `DATABASE_URL` Secrets and consumer
+group ids are dropped here on purpose.
 
-`new-service.sh` already generated `Dockerfile` and `.dockerignore` for you (verbatim from
-the fleet reference). The chart is NOT generated: it is shaped by what the service runs
-(consumer groups, MCP, analytics, frontend), so copy the closest sibling's
-`charts/<repo>/` and adapt it. References on `origin/develop`:
-`IQVO/pick-face-replenishment` (Kafka consumers, MCP, analytics, frontend) and
-`IQVO/task-interleaving`.
+| # | Item | State on develop | Guarded by |
+|---|------|------------------|------------|
+| 1 | ✅ **Real runtime only.** `cmd/emulator` wires the real MQTT gateways; no in-memory adapter, no `*_MODE` fallback. It exits at boot without `WORLD_FILE` or with an invalid world. | Done. | `TestRuntimeBinaryHasNoInMemoryAdapters`; `internal/config` tests. |
+| 2 | ✅ **No Go file at the repo root.** The godog runner lives in `features/`, the binary in `cmd/emulator/`. | Done. | `TestNoGoFilesAtRepoRoot`. |
+| 3 | ✅ **`Dockerfile` builds every `cmd/*`**; `ENTRYPOINT ["./emulator"]`, `EXPOSE 8080` matches `HTTP_ADDR`. | Done. Verified 2026-11-21 on develop `342ff09`: `docker build --platform linux/amd64 .` succeeds. The image ships `config/world.example.yaml` as `WORLD_FILE=/etc/emulator/world.yaml`, so `docker run --rm <image>` boots the world and exits 1 on the MQTT connect (no broker at the default `tcp://localhost:1883`) after the 15 s connect wait, not on a missing `WORLD_FILE`. | `trivy-scan` on PRs; `docker-publish` on push to `main`. |
+| 4 | ✅ **`.dockerignore`** excludes docs, charts, harness and test output. | Done. | none: review once. |
+| 5 | ✅ **Helm chart `charts/equipment-emulator/`**, `Chart.yaml` `name: equipment-emulator`, matching the `release` job's `helm package` file name. | Done. | `helm-lint` (PRs) and the `release` job. |
+| 6 | **Pod hardening and shutdown room.** `runAsNonRoot`, `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` are in `values.yaml`. The HTTP shutdown is bounded at 5 s, inside the Kubernetes default 30 s grace period. | Hardening done. Not ticked: the grace period is not set explicitly and not chart-tested (the 5 s HTTP bound sits inside the Kubernetes default 30 s). | review. |
+| 7 | ✅ **Chart tests** `charts/equipment-emulator/tests/` (`render_test.sh`, `test_service_selectors.py`): envFrom ConfigMap, every env var `cmd/emulator` reads, `world.yaml` in the ConfigMap, probes on `/healthz` and `/readyz`, one Deployment, every Service selects exactly one Deployment. | Done. | `chart-tests` job. |
+| 8 | ✅ **Optional CI jobs match the service.** No `web/`: no `web` job and no knip step in `drift`. The Docusaurus site under `docs/` has the `Docs` workflow (`docs.yml`, builds on PRs, deploys Pages from `main`) and the `docs-api-drift` job. `api-lint` lints both `apis/openapi.yaml` and `apis/asyncapi.yaml`. GitHub Pages is enabled with source "GitHub Actions"; the first push to `main` publishes the site. | Done. | first PR's CI run; the first `Docs` run on `main`. |
+| 9 | ✅ **Registry access**: images push to `ghcr.io/iqvo` with the Actions token (`packages: write` on `docker-publish`/`release`). | Done: `ci.yml` grants `packages: write` and logs in with `GITHUB_TOKEN`; the identical job shape published `ghcr.io/iqvo/asrs-control:v0.1.0` on 2026-11-21. No Docker Hub secrets needed. | none. |
+| 10 | ✅ **`govulncheck` is clean** (`make vuln`, CI `vuln` job). | Done: `make vuln` prints "No vulnerabilities found." on develop `342ff09` (2026-11-21); CI `vuln` green. | `vuln` job (a `docker-publish` prerequisite). |
+| 11 | **Deployment target.** The emulator needs the WCS Mosquitto broker (`mqtt.url`, default `tcp://mosquitto.warehouse-systems.svc.cluster.local:1883`) and an entry in `warehouse-infra`'s application registry. | Not ticked: not yet registered in `warehouse-infra` (a later wave). | none. |
 
-| # | Item | Done when | Guarded by |
-|---|------|-----------|------------|
-| 1 | **Real runtime only.** `cmd/api` wires Postgres and Kafka; the in-memory adapters (`internal/adapters/outbound/memory`) are test doubles. No `*_MODE`/permissive fallback, no default that boots "healthy" without `DATABASE_URL` or `KAFKA_BROKERS`. | `cmd/**` has no import of the memory package; the binary exits at boot on missing `DATABASE_URL`, `KAFKA_BROKERS` or a consumer group id. | `TestRuntimeBinaryHasNoInMemoryAdapters` (`internal/architecture/runtime_no_memory_fitness_test.go`). The boot-error behaviour has no generic sensor: cover it in `cmd/api` tests and in the chart test (row 8). |
-| 2 | **No Go file at the repo root.** The godog runner and steps live in `features/` (`package features_test`, `Paths: "."`), binaries in `cmd/<name>/`, everything else in `internal/`. | `ls *.go` at the root prints nothing; `make bdd` still finds `TestFeatures`. | `TestNoGoFilesAtRepoRoot` (`internal/architecture/no_go_files_at_root_fitness_test.go`). |
-| 3 | **`Dockerfile` builds every `cmd/*`.** Generated; confirm `ENTRYPOINT ["./api"]` matches your main binary and `EXPOSE` matches `HTTP_ADDR`. | `docker build .` succeeds locally; `docker run --rm <image> /app/api` starts (or exits with the intended config error). | `trivy-scan` job builds the image on every PR to `main`/`develop`; `docker-publish` on push to `main`. |
-| 4 | **`.dockerignore`** excludes docs, charts, harness, tests output. Generated. | Build context is small; `.git`, `.claude/`, `docs/`, `charts/` are not sent. | none: review once. |
-| 5 | **Helm chart `charts/equipment-emulator/`** with `Chart.yaml` `name: equipment-emulator`. The chart directory name, the `Chart.yaml` name and the `helm package` file name in the `release` job must all be `equipment-emulator`. | `helm lint charts/equipment-emulator` and `helm template` with the required values both pass. | `helm-lint` (PRs) and the `release` job (packages `equipment-emulator-<version>.tgz`). |
-| 6 | **`DATABASE_URL` comes from a Secret** (`secretKeyRef`, chart `secret.yaml` or `database.existingSecret`), never from the ConfigMap or a literal. | `helm template` shows `secretKeyRef` for `DATABASE_URL`; the ConfigMap has no DSN. | chart test (row 8). |
-| 7 | **Pod hardening and shutdown room.** `runAsNonRoot`, `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`; `terminationGracePeriodSeconds` greater than the sum of the binary's shutdown bounds (drain delay + HTTP + consumers + relay). | Values and Deployment carry all of it; the chart refuses a grace period below the sum. | chart test (row 8). |
-| 8 | **Chart tests in `charts/equipment-emulator/tests/`** (`render_test.sh`, `test_service_selectors.py`): envFrom ConfigMap mounted, mandatory values refuse to render, every env var `cmd/api` reads is rendered, no `*_MODE`, Secret for the DSN, hardening, grace period, every Service selects exactly one Deployment. Copy and adapt the reference tests. | `bash charts/equipment-emulator/tests/render_test.sh` prints `PASS`. | `chart-tests` job runs every `tests/*.sh` and `test_*.py`. **It only warns when the directory is empty**, so an absent test passes CI: the checklist is the guard. |
-| 9 | **Consumer group ids are chart values**, stable and service-prefixed, never derived from the pod name. | Each `*_CONSUMER_GROUP` is rendered from `config.*` and refuses to render empty. | chart test (row 8); `kafka-testing-and-consumers.md` rule. |
-| 10 | **Optional CI jobs match the service.** `web` (needs `web/`), `docs-api-drift` (needs `docs/` and `apis/openapi.yaml`), `api-lint` (needs `apis/*.yaml` and the spectral rulesets): delete a job and its `docker-publish` `needs:` entry if the service has no such part, or add the part. | No job in `ci.yml` is permanently red or skipped for a missing directory. | first PR's CI run. |
-| 11 | **Registry access** images push to `ghcr.io/iqvo` with the Actions token (`packages: write` on `docker-publish`/`release`, already in `ci.yml`); no Docker Hub secrets are needed. | A dry-run of `docker-publish` on a throwaway branch, or ask the repo admin. | none. |
-| 12 | **`govulncheck` is clean** before the PR to `main` (CI `vuln` job installs `@latest`; `make vuln` runs the same command). | `make vuln` exits 0. | `vuln` job (a `docker-publish` prerequisite). |
-
-Tick this list in the PR that adds `Dockerfile`/chart wiring, and keep the file: it is the
-service's packaging record. Reference for the three failures this list prevents: a runtime that
-can run without Postgres/Kafka (row 1), Go files at the root (row 2), a release that fails on
-the first push to `main` because packaging was never built (rows 3-8).
+Tick this list in the release PR and keep the file: it is the emulator's packaging record.

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # --- build stage ---
-FROM golang:1.27-alpine@sha256:738d1cf061836894ff6bb8c33881080ac66de8cf0586615012a0c8f592649cfa AS build
+FROM golang:1.27-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 WORKDIR /src
 
 # Cache go.mod/go.sum download separately from source so editing source
@@ -35,12 +35,13 @@ RUN apk upgrade --no-cache && \
     apk add --no-cache ca-certificates tzdata && \
     addgroup -g 1000 -S app && adduser -u 1000 -S app -G app
 WORKDIR /app
-# Embed the SQL migrations in the binary (go:embed) so no migrations directory
-# is copied. The service writes nothing to disk, so the chart mounts the root
-# filesystem read-only. Logs go to stdout.
+# The emulator writes nothing to disk, so the chart mounts the root filesystem
+# read-only. Logs go to stdout. The example world is the default; the chart
+# mounts its own world.yaml over /etc/emulator.
 COPY --from=build --chown=app:app /out/ ./
+COPY --from=build --chown=app:app /src/config/world.example.yaml /etc/emulator/world.yaml
+ENV WORLD_FILE=/etc/emulator/world.yaml
 USER 1000
 EXPOSE 8080
-# cmd/api is the service's main binary (HTTP on :8080). Additional cmd/*
-# binaries are run by the chart with `command: ["/app/<dirname>"]`.
-ENTRYPOINT ["./api"]
+# cmd/emulator is the only binary (admin API on :8080).
+ENTRYPOINT ["./emulator"]
