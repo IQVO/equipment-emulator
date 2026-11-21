@@ -175,13 +175,12 @@ jobs:
       - name: Integration tests (testcontainers; each test boots its own Postgres/Kafka)
         run: go test -tags=integration ./... -race -count=1
 
-  # Fast, BLOCKING mutation subset: runs on every push/PR so a drop in test
-  # quality (tests that execute but stop asserting) is caught immediately.
-  # Subset = ./internal/domain/robot, the StockUnit aggregate: the richest
-  # behavioural core in the domain (15 of the 41 domain mutants) and it
-  # completes in ~1 minute. Thresholds/workers/timeout come from .gremlins.yaml,
-  # so this job, the scheduled `mutation` job below and `make mutation` all
-  # agree. The exhaustive run stays in the `mutation` job.
+  # Fast, BLOCKING mutation run: on every push/PR so a drop in test quality
+  # (tests that execute but stop asserting) is caught immediately. It runs
+  # gremlins once PER domain package (robot, asrs, simclock), so a weak package
+  # cannot hide behind the aggregate. Thresholds/workers/timeout come from
+  # .gremlins.yaml, so this job, the scheduled `mutation` job below and
+  # `make mutation` all agree. The aggregate run stays in the `mutation` job.
   # ============================================================
   # CLASSIFICATION: TEST QUALITY (MUTATION TESTING, fast subset)
   # ============================================================
@@ -195,8 +194,16 @@ jobs:
           go-version-file: go.mod
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
-      - name: Mutation testing (fast subset — robot aggregate)
-        run: gremlins unleash ./internal/domain/robot
+      - name: Mutation testing (every domain package)
+        run: |
+          # Cap virtual memory so a mutant that loops without bound (the `a++` -> `a--`
+          # mutant of asrs.New's aisle loop appends units forever) dies with "out of
+          # memory" and counts as KILLED, instead of exhausting the runner VM.
+          ulimit -v 4000000
+          for pkg in ./internal/domain/*/; do
+            echo "== gremlins unleash ${pkg%/}"
+            gremlins unleash "${pkg%/}" || exit 1
+          done
 
   mutation:
     runs-on: ubuntu-latest
@@ -213,7 +220,10 @@ jobs:
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
       - name: Mutation testing (domain layer)
-        run: gremlins unleash ./internal/domain --workers 1 --timeout-coefficient 30
+        run: |
+          # Same memory cap as mutation-fast (a runaway mutant must not exhaust the VM).
+          ulimit -v 4000000
+          gremlins unleash ./internal/domain --workers 1 --timeout-coefficient 30
       - name: Open or refresh the harness:red issue on a scheduled failure
         if: failure() && github.event_name == 'schedule'
         env:

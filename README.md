@@ -145,7 +145,7 @@ The docs site: `cd docs && npm ci && npm run build`; after a change to
 - Unit tests (`make test`); 90% coverage gate on domain and application (`make coverage`).
 - BDD: `features/robot.feature`, `features/asrs.feature` (`make bdd`).
 - Integration: MQTT gateways against Mosquitto 2.0.20 via testcontainers (`make integration`).
-- Mutation: gremlins on `internal/domain/robot` and `internal/domain` (`make mutation`, `make mutation-full`).
+- Mutation: gremlins on each `internal/domain/*` package and on `internal/domain` (`make mutation`, `make mutation-full`); gate 99/99, residual mutants in `MUTATION.md`.
 - Architecture fitness tests (`make arch-test`); chart tests in `charts/equipment-emulator/tests/`.
 
 CI jobs (`.github/workflows/ci.yml`): `lint`, `guide-lint`, `complexity`,

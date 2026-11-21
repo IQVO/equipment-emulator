@@ -16,7 +16,7 @@ description: "The test suites, the local gates and the CI jobs that run them."
 | BDD (godog) | `features/robot.feature` (a blocked robot stops and reports it; an unblocked robot finishes its order), `features/asrs.feature` (a no-read hides the container; a unit fault holds the job), runner `features/steps_test.go` | `make bdd` |
 | Integration | `internal/adapters/mqtt/gateway_integration_test.go`, `-tags=integration`, Mosquitto 2.0.20 via testcontainers (needs Docker only) | `make integration` |
 | Architecture fitness | `internal/architecture/` (layering, no in-memory adapters in `cmd/`, no root `.go` files, no auth middleware, plus fleet sensors copied from the template) | `make arch-test` |
-| Mutation | gremlins on `./internal/domain/robot` (fast) and `./internal/domain` (full); thresholds measured in `.gremlins.yaml` | `make mutation`, `make mutation-full` |
+| Mutation | gremlins on each `./internal/domain/*` package (fast, per package) and `./internal/domain` (full); residual mutants in `MUTATION.md`; thresholds measured in `.gremlins.yaml` | `make mutation`, `make mutation-full` |
 | Chart tests | `charts/equipment-emulator/tests/render_test.sh`, `test_service_selectors.py` | run each file directly |
 
 ## Local gates
