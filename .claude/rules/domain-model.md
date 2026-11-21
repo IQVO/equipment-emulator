@@ -31,7 +31,7 @@ adapters (`internal/adapters/vda5050`, `internal/adapters/telegram`).
 
 ## Aggregates and their invariants
 
-- **`robot.Robot`** (richest aggregate; the `mutation-fast` target):
+- **`robot.Robot`** (richest aggregate; `mutation-fast` covers every domain package: asrs, robot, simclock):
   - A new `orderId` is accepted only when the current order is finished, and its first node must
     be the robot's last node or within `PositionTolerance` (0.5 m) of its pose → else
     `INVALID_ORDER`.
