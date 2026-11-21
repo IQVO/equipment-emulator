@@ -782,5 +782,5 @@ jobs:
             Docker image: `ghcr.io/iqvo/equipment-emulator:${{ steps.version.outputs.version }}`
             (also tagged `latest` and `${{ env.SHORT_SHA }}`)
 
-            Helm chart: `oci://ghcr.io/ghcr.io/iqvo/equipment-emulator:${{ steps.version.outputs.version }}`
+            Helm chart: `oci://ghcr.io/iqvo/equipment-emulator:${{ steps.version.outputs.version }}`
             (also attached below as a `.tgz`)
